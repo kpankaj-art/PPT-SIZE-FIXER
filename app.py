@@ -1,22 +1,21 @@
 import pandas as pd
 from pptx import Presentation
 from pptx.enum.text import PP_ALIGN
+from pptx.util import Pt
 import streamlit as st
 
 st.set_page_config(
-    page_title="PPT Exact Box Automator", page_icon="📊", layout="centered"
+    page_title="PPT Size & Remarks Automator", page_icon="📊", layout="centered"
 )
 
-st.title("📊 100% Original Style & Exact Box Size Automator")
+st.title("📊 Auto-Fit Text PPT Automator")
 st.write(
-    "Yeh code box ki Width, Height, Border Color aur Font Style ko bilkul unchanged rakhega."
+    "Yeh code text ko single line me rakhega aur long values ke liye font size auto-adjust karega."
 )
 
 st.markdown("---")
 
-uploaded_excel = st.file_uploader(
-    "1. Upload Excel File (.xlsx)", type=["xlsx"]
-)
+uploaded_excel = st.file_uploader("1. Upload Excel File (.xlsx)", type=["xlsx"])
 uploaded_ppt = st.file_uploader("2. Upload PPT File (.pptx)", type=["pptx"])
 
 if uploaded_excel and uploaded_ppt:
@@ -32,7 +31,7 @@ if uploaded_excel and uploaded_ppt:
                 )
                 df = pd.read_excel(uploaded_excel, sheet_name=sheet_to_use)
 
-                # 2. Find Size & Remarks Columns in Excel
+                # 2. Find Size & Remarks Columns
                 size_column_name = None
                 remarks_column_name = None
 
@@ -47,7 +46,7 @@ if uploaded_excel and uploaded_ppt:
 
                 # Process Slides
                 for i, slide in enumerate(prs.slides):
-                    # Fetch Values from Excel
+                    # Fetch Excel Values
                     try:
                         if size_column_name:
                             size_val = str(df[size_column_name].iloc[i]).strip()
@@ -64,7 +63,10 @@ if uploaded_excel and uploaded_ppt:
                     except Exception:
                         remarks_val = ""
 
-                    # Direct Search & In-Place Text Replacement
+                    # Clean newlines or trailing spaces
+                    size_val = " ".join(size_val.split())
+                    remarks_val = " ".join(remarks_val.split())
+
                     for shape in slide.shapes:
                         if shape.has_text_frame:
                             txt = shape.text_frame.text.strip()
@@ -94,58 +96,60 @@ if uploaded_excel and uploaded_ppt:
                                 and not is_excluded
                             )
 
-                            # -------------------------------------------------------------
-                            # UPDATE SIZE BOX (In-Place Edit without changing Box Style)
-                            # -------------------------------------------------------------
+                            # UPDATE SIZE BOX
                             if is_size_box and size_val and size_val.lower() != "nan":
                                 tf = shape.text_frame
+                                tf.word_wrap = False  # Stacking hone se roke
+
                                 final_size_text = (
                                     size_val
                                     if size_val.lower().startswith("size")
                                     else f"Size: {size_val}"
                                 )
 
-                                if len(tf.paragraphs) > 0:
-                                    p = tf.paragraphs[0]
-                                    if len(p.runs) > 0:
-                                        p.runs[0].text = final_size_text
-                                        # Purani extra runs clear karein taaki text overflow na ho
-                                        for r in p.runs[1:]:
-                                            r.text = ""
-                                    else:
-                                        p.text = final_size_text
+                                # Clear extra paragraphs
+                                while len(tf.paragraphs) > 1:
+                                    p_elem = tf.paragraphs[-1]._p
+                                    p_elem.getparent().remove(p_elem)
 
-                                    p.alignment = PP_ALIGN.CENTER
+                                p = tf.paragraphs[0]
+                                p.text = final_size_text
+                                p.alignment = PP_ALIGN.CENTER
 
-                            # -------------------------------------------------------------
+                                # Dynamic Auto-Font Sizing based on length
+                                text_len = len(final_size_text)
+                                font_size = Pt(14) if text_len < 12 else (Pt(11) if text_len < 16 else Pt(9.5))
+
+                                for run in p.runs:
+                                    run.font.size = font_size
+                                    run.font.bold = True
+
                             # UPDATE REMARKS BOX
-                            # -------------------------------------------------------------
                             if is_remarks_box and remarks_val and remarks_val.lower() != "nan":
                                 tf = shape.text_frame
+                                tf.word_wrap = False
+
                                 final_remarks_text = (
                                     remarks_val
                                     if remarks_val.lower().startswith("remark")
                                     else f"Remarks: {remarks_val}"
                                 )
 
-                                if len(tf.paragraphs) > 0:
-                                    p = tf.paragraphs[0]
-                                    if len(p.runs) > 0:
-                                        p.runs[0].text = final_remarks_text
-                                        for r in p.runs[1:]:
-                                            r.text = ""
-                                    else:
-                                        p.text = final_remarks_text
+                                while len(tf.paragraphs) > 1:
+                                    p_elem = tf.paragraphs[-1]._p
+                                    p_elem.getparent().remove(p_elem)
 
-                # Save Presentation
+                                p = tf.paragraphs[0]
+                                p.text = final_remarks_text
+
+                                for run in p.runs:
+                                    run.font.size = Pt(11)
+
                 output_ppt_path = "Updated_Presentation.pptx"
                 prs.save(output_ppt_path)
 
-                st.success(
-                    "🎉 PPT Successfully Updated! Size Box ka dimensions aur color original PPT se 100% match karega."
-                )
+                st.success("🎉 PPT Successfully Updated! Text bilkul perfectly fit ho gaya hai.")
 
-                # Download Button
                 with open(output_ppt_path, "rb") as file:
                     st.download_button(
                         label="📥 Download Updated PPT",
