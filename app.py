@@ -6,19 +6,17 @@ from pptx.enum.text import PP_ALIGN
 from pptx.util import Pt
 import streamlit as st
 
-# Page Title & Configuration
 st.set_page_config(
     page_title="PPT Size Box Automator", page_icon="📊", layout="centered"
 )
 
 st.title("📊 PPT Size Box Auto-Fixer")
 st.write(
-    "Apni **Excel File** aur **PPT File** upload karein. System automatically size boxes ko clean karke naya size write kar dega."
+    "Apni **Excel File** aur **PPT File** upload karein. Code slide ke saare purane text ko clean karke naya aligned Orange Size Box bana dega."
 )
 
 st.markdown("---")
 
-# File Uploaders
 uploaded_excel = st.file_uploader(
     "1. Upload Excel File (.xlsx)", type=["xlsx"]
 )
@@ -38,24 +36,7 @@ if uploaded_excel and uploaded_ppt:
                         size_column_name = col
                         break
 
-                if size_column_name:
-                    st.info(
-                        f"✅ Excel me Automatic Size Column mil gaya: **'{size_column_name}'**"
-                    )
-                else:
-                    st.warning(
-                        "⚠️ Excel me 'Size' column nahi mila. Fallback Index 7 (Column H) use ho raha hai."
-                    )
-
-                # Read PPT
                 prs = Presentation(uploaded_ppt)
-
-                last_left = None
-                last_top = None
-                last_width = None
-                last_height = None
-                last_color = None
-
                 manual_check_slides = []
 
                 # Process Slides
@@ -71,101 +52,107 @@ if uploaded_excel and uploaded_ppt:
                     except Exception:
                         size_val = ""
 
-                    box_found = False
+                    type_box = None
+                    qty_box = None
                     shapes_to_remove = []
 
-                    # STEP 1: Current Slide par Purana Size Box Dhoondhna
+                    # STEP 1: Slide ke sabhi Shapes ko scan karein
                     for shape in slide.shapes:
                         if shape.has_text_frame:
-                            txt = shape.text_frame.text.strip().lower()
+                            txt = shape.text_frame.text.strip()
+                            txt_lower = txt.lower()
 
-                            # Match conditions: 'size', 'x' (jaise 8x3ya 96 x 36)
+                            # Detect Type Box & Qty Box (Position matching ke liye)
+                            if "type" in txt_lower and "size" not in txt_lower:
+                                type_box = shape
+                            elif "qty" in txt_lower and "size" not in txt_lower:
+                                qty_box = shape
+
+                            # Clean/Delete: Size word ho, 'x' pattern ho ya bottom-middle space me floating text ho
                             if (
-                                "size" in txt
-                                or "x" in txt
-                                or "x" in txt.replace(" ", "")
+                                "size" in txt_lower
+                                or ("x" in txt_lower and len(txt) < 20)
+                                or (
+                                    shape.top > Pt(380)
+                                    and shape.left > Pt(350)
+                                    and shape.left < Pt(650)
+                                    and "type" not in txt_lower
+                                    and "qty" not in txt_lower
+                                )
                             ):
                                 shapes_to_remove.append(shape)
-                                box_found = True
 
-                                # Save position & dimensions
-                                last_left = shape.left
-                                last_top = shape.top
-                                last_width = shape.width
-                                last_height = shape.height
-
-                                try:
-                                    if shape.line.fill.type == 1:
-                                        last_color = shape.line.color.rgb
-                                except Exception:
-                                    pass
-
-                    # STEP 2: Purane Box ka Text pehle CLEAR karein, fir Shape Delete karein
+                    # STEP 2: Purane Shapes aur Background Plain Text Complete Wipe Out
                     for shape in shapes_to_remove:
                         try:
-                            # Pehle text ko completely empty kar dein (Overlap Prevention)
                             shape.text_frame.text = ""
                             for p in shape.text_frame.paragraphs:
                                 p.text = ""
-
-                            # Phir shape ko XML tree se remove karein
                             sp = shape._element
                             sp.getparent().remove(sp)
                         except Exception:
                             pass
 
-                    # STEP 3: Naya Clean Box Banayein
-                    if size_val and size_val.lower() != "nan":
-                        if last_left is not None:
-                            new_box = slide.shapes.add_shape(
-                                MSO_SHAPE.RECTANGLE,
-                                last_left,
-                                last_top,
-                                last_width,
-                                last_height,
+                    # STEP 3: Alignment Calculate Karein (Type aur Qty ke beech)
+                    if type_box and qty_box:
+                        target_left = int(
+                            (
+                                type_box.left
+                                + type_box.width
+                                + qty_box.left
+                                - Pt(130)
                             )
+                            / 2
+                        )
+                        target_top = type_box.top
+                        target_width = Pt(130)
+                        target_height = type_box.height
+                    else:
+                        # Fallback position agar Type/Qty na mile
+                        target_left = Pt(450)
+                        target_top = Pt(437)
+                        target_width = Pt(130)
+                        target_height = Pt(30)
 
-                            new_box.fill.background()
+                    # STEP 4: Perfect Single Clean Orange Box Create Karein
+                    if size_val and size_val.lower() != "nan":
+                        new_box = slide.shapes.add_shape(
+                            MSO_SHAPE.RECTANGLE,
+                            target_left,
+                            target_top,
+                            target_width,
+                            target_height,
+                        )
 
-                            if last_color is None:
-                                last_color = RGBColor(227, 108, 10)
+                        new_box.fill.background()
+                        new_box.line.color.rgb = RGBColor(
+                            227, 108, 10
+                        )  # Orange Border
+                        new_box.line.width = Pt(2.0)  # Clean Border
 
-                            new_box.line.color.rgb = last_color
-                            new_box.line.width = Pt(3.0)  # Border Thickness
+                        tf = new_box.text_frame
+                        tf.word_wrap = False
+                        p = tf.paragraphs[0]
+                        p.text = f"Size: {size_val}"
+                        p.alignment = PP_ALIGN.CENTER
 
-                            tf = new_box.text_frame
-                            tf.word_wrap = False
+                        run = p.runs[0]
+                        run.font.name = "Calibri"
+                        run.font.size = Pt(16)
+                        run.font.bold = True
+                        run.font.color.rgb = RGBColor(
+                            0, 80, 160
+                        )  # PPT Blue Font
 
-                            # Text set karne se pehle purana clear kar rahe hain
-                            p = tf.paragraphs[0]
-                            p.text = f"Size: {size_val}"
-                            p.alignment = PP_ALIGN.CENTER
-
-                            run = p.runs[0]
-                            run.font.name = "Calibri"
-                            run.font.size = Pt(18)
-                            run.font.bold = True
-                            run.font.color.rgb = RGBColor(
-                                0, 80, 160
-                            )  # PPT Blue
-                        else:
-                            manual_check_slides.append(slide_no)
-
-                # Save output PPT
+                # Save Output
                 output_ppt_path = "Updated_Presentation.pptx"
                 prs.save(output_ppt_path)
 
                 st.success(
-                    "🎉 PPT Successfully Update ho gayi hai! Pure Old Text Delete ho gaye hain."
+                    "🎉 PPT Successfully Clean & Align Ho Gayi Hai! Old Overlapping Text Bilkul Clear Ho Gaya."
                 )
 
-                if manual_check_slides:
-                    st.warning(
-                        f"⚠️ **In Slide Numbers par pehle se koi box/reference nahi mila:** {manual_check_slides}\n\n"
-                        "👉 In slides par Size Box ko kripya manually check karein."
-                    )
-
-                # Provide Download Button
+                # Download Button
                 with open(output_ppt_path, "rb") as file:
                     st.download_button(
                         label="📥 Download Updated PPT",
@@ -175,4 +162,4 @@ if uploaded_excel and uploaded_ppt:
                     )
 
             except Exception as e:
-                st.error(f"❌ Kuch error aaya: {e}")
+                st.error(f"❌ Error aaya: {e}")
