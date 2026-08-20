@@ -1,135 +1,156 @@
-import os
 import pandas as pd
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import PP_ALIGN
 from pptx.util import Pt
+import streamlit as st
 
-# Relative Paths (Repo ke files)
-excel_path = "input_excel.xlsx"
-ppt_path = "input_ppt.pptx"
-output_ppt_path = "Updated_Presentation.pptx"
+# Page Title & Configuration
+st.set_page_config(
+    page_title="PPT Size Box Automator", page_icon="📊", layout="centered"
+)
 
-if not os.path.exists(excel_path) or not os.path.exists(ppt_path):
-    print("❌ Error: Input Excel ya PPT file repo me nahi mili!")
-    exit(1)
+st.title("📊 PPT Size Box Auto-Fixer")
+st.write(
+    "Apni **Excel File** aur **PPT File** upload karein. System automatically size boxes ko update/fix karke aapko download link de dega."
+)
 
-# Excel sheet read karein
-df = pd.read_excel(excel_path, sheet_name="Merged_Result")
+st.markdown("---")
 
-# ==========================================
-# AUTOMATIC COLUMN SEARCH LOGIC (Excel)
-# ==========================================
-size_column_name = None
+# File Uploaders
+uploaded_excel = st.file_uploader(
+    "1. Upload Excel File (.xlsx)", type=["xlsx"]
+)
+uploaded_ppt = st.file_uploader("2. Upload PPT File (.pptx)", type=["pptx"])
 
-# Excel ke sabhi column names me 'size' keyword dhoondho
-for col in df.columns:
-    if "size" in str(col).lower():
-        size_column_name = col
-        break
+if uploaded_excel and uploaded_ppt:
+    if st.button("🚀 Process & Generate Updated PPT", type="primary"):
+        with st.spinner("Processing Presentation and Excel Data..."):
+            try:
+                # Read Excel
+                df = pd.read_excel(uploaded_excel, sheet_name="Merged_Result")
 
-if size_column_name:
-    print(f"✅ Excel me Automatic Size Column mil gaya: '{size_column_name}'")
-else:
-    print(
-        "⚠️ Warning: Excel me 'Size' naam ka column nahi mila! Fallback Column Index 7 (Column H) use kar rahe hain."
-    )
+                # Auto Find Size Column
+                size_column_name = None
+                for col in df.columns:
+                    if "size" in str(col).lower():
+                        size_column_name = col
+                        break
 
-prs = Presentation(ppt_path)
+                if size_column_name:
+                    st.info(
+                        f"✅ Excel me Automatic Size Column mil gaya: **'{size_column_name}'**"
+                    )
+                else:
+                    st.warning(
+                        "⚠️ Excel me 'Size' column nahi mila. Fallback Index 7 (Column H) use ho raha hai."
+                    )
 
-last_left = None
-last_top = None
-last_width = None
-last_height = None
-last_color = None
+                # Read PPT
+                prs = Presentation(uploaded_ppt)
 
-manual_check_slides = []
+                last_left = None
+                last_top = None
+                last_width = None
+                last_height = None
+                last_color = None
 
-for i, slide in enumerate(prs.slides):
-    slide_no = i + 1
+                manual_check_slides = []
 
-    # Dynamic Column Value Read Logic
-    try:
-        if size_column_name:
-            size_val = str(df[size_column_name].iloc[i]).strip()
-        else:
-            size_val = str(df.iloc[i, 7]).strip()  # Fallback to Column H
-    except Exception:
-        size_val = ""
+                # Process Slides
+                for i, slide in enumerate(prs.slides):
+                    slide_no = i + 1
 
-    box_found = False
-    shapes_to_remove = []
+                    try:
+                        if size_column_name:
+                            size_val = str(df[size_column_name].iloc[i]).strip()
+                        else:
+                            size_val = str(df.iloc[i, 7]).strip()
+                    except Exception:
+                        size_val = ""
 
-    # STEP 1: Current Slide par Purana Box Search Karein
-    for shape in slide.shapes:
-        if shape.has_text_frame:
-            if "Size" in shape.text_frame.text:
-                shapes_to_remove.append(shape)
-                box_found = True
+                    box_found = False
+                    shapes_to_remove = []
 
-                last_left = shape.left
-                last_top = shape.top
-                last_width = shape.width
-                last_height = shape.height
+                    # Search existing Size Box
+                    for shape in slide.shapes:
+                        if shape.has_text_frame:
+                            if "Size" in shape.text_frame.text:
+                                shapes_to_remove.append(shape)
+                                box_found = True
 
-                try:
-                    if shape.line.fill.type == 1:
-                        last_color = shape.line.color.rgb
-                except Exception:
-                    pass
+                                last_left = shape.left
+                                last_top = shape.top
+                                last_width = shape.width
+                                last_height = shape.height
 
-    # STEP 2: Delete Old Box
-    for shape in shapes_to_remove:
-        sp = shape._element
-        sp.getparent().remove(sp)
+                                try:
+                                    if shape.line.fill.type == 1:
+                                        last_color = shape.line.color.rgb
+                                except Exception:
+                                    pass
 
-    # STEP 3: Create New Box (If Reference Exists)
-    if size_val and size_val.lower() != "nan":
-        if last_left is not None:
-            new_box = slide.shapes.add_shape(
-                MSO_SHAPE.RECTANGLE,
-                last_left,
-                last_top,
-                last_width,
-                last_height,
-            )
+                    # Delete old boxes
+                    for shape in shapes_to_remove:
+                        sp = shape._element
+                        sp.getparent().remove(sp)
 
-            new_box.fill.background()
+                    # Re-create box
+                    if size_val and size_val.lower() != "nan":
+                        if last_left is not None:
+                            new_box = slide.shapes.add_shape(
+                                MSO_SHAPE.RECTANGLE,
+                                last_left,
+                                last_top,
+                                last_width,
+                                last_height,
+                            )
 
-            if last_color is None:
-                last_color = RGBColor(227, 108, 10)
+                            new_box.fill.background()
 
-            new_box.line.color.rgb = last_color
-            new_box.line.width = Pt(3.0)
+                            if last_color is None:
+                                last_color = RGBColor(227, 108, 10)
 
-            tf = new_box.text_frame
-            tf.word_wrap = False
-            p = tf.paragraphs[0]
-            p.text = f"Size: {size_val}"
-            p.alignment = PP_ALIGN.CENTER
+                            new_box.line.color.rgb = last_color
+                            new_box.line.width = Pt(3.0)
 
-            run = p.runs[0]
-            run.font.name = "Calibri"
-            run.font.size = Pt(18)
-            run.font.bold = True
-            run.font.color.rgb = RGBColor(0, 80, 160)
-        else:
-            manual_check_slides.append(slide_no)
+                            tf = new_box.text_frame
+                            tf.word_wrap = False
+                            p = tf.paragraphs[0]
+                            p.text = f"Size: {size_val}"
+                            p.alignment = PP_ALIGN.CENTER
 
-# Save Processed PPT
-prs.save(output_ppt_path)
+                            run = p.runs[0]
+                            run.font.name = "Calibri"
+                            run.font.size = Pt(18)
+                            run.font.bold = True
+                            run.font.color.rgb = RGBColor(0, 80, 160)
+                        else:
+                            manual_check_slides.append(slide_no)
 
-print("\n" + "=" * 50)
-print("PROCESS COMPLETED SUCCESSFULLY!")
-print("=" * 50)
+                # Save output to memory buffer for download
+                output_ppt_path = "Updated_Presentation.pptx"
+                prs.save(output_ppt_path)
 
-if manual_check_slides:
-    print(
-        f"\n⚠️ WARNING: Niche di gayi Slides par koi box/reference nahi mila:"
-    )
-    print(f"Slide Numbers: {manual_check_slides}")
-    print("👉 In slides par Size Box ko MANUALLY check karein.")
-else:
-    print("\n✅ Sabhi slides successfully update ho gayi hain!")
-print("=" * 50)
+                st.success(
+                    "🎉 PPT Successfully Update ho gayi hai! Niche button se download karein."
+                )
+
+                if manual_check_slides:
+                    st.warning(
+                        f"⚠️ **In Slide Numbers par pehle se koi box/reference nahi mila:** {manual_check_slides}\n\n"
+                        "👉 In slides par Size Box ko kripya manually check karein."
+                    )
+
+                # Provide Download Button
+                with open(output_ppt_path, "rb") as file:
+                    st.download_button(
+                        label="📥 Download Updated PPT",
+                        data=file,
+                        file_name="Updated_Presentation.pptx",
+                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    )
+
+            except Exception as e:
+                st.error(f"❌ Kuch error aaya: {e}")
