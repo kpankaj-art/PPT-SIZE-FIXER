@@ -13,7 +13,7 @@ st.set_page_config(
 
 st.title("📊 PPT Size Box Auto-Fixer")
 st.write(
-    "Apni **Excel File** aur **PPT File** upload karein. System automatically size boxes ko update/fix karke aapko download link de dega."
+    "Apni **Excel File** aur **PPT File** upload karein. System automatically size boxes ko clean karke naya size write kar dega."
 )
 
 st.markdown("---")
@@ -31,7 +31,7 @@ if uploaded_excel and uploaded_ppt:
                 # Read Excel
                 df = pd.read_excel(uploaded_excel, sheet_name="Merged_Result")
 
-                # Auto Find Size Column
+                # Auto Find Size Column in Excel
                 size_column_name = None
                 for col in df.columns:
                     if "size" in str(col).lower():
@@ -62,6 +62,7 @@ if uploaded_excel and uploaded_ppt:
                 for i, slide in enumerate(prs.slides):
                     slide_no = i + 1
 
+                    # Get Size value from Excel
                     try:
                         if size_column_name:
                             size_val = str(df[size_column_name].iloc[i]).strip()
@@ -73,13 +74,21 @@ if uploaded_excel and uploaded_ppt:
                     box_found = False
                     shapes_to_remove = []
 
-                    # Search existing Size Box
+                    # STEP 1: Current Slide par Purana Size Box Dhoondhna
                     for shape in slide.shapes:
                         if shape.has_text_frame:
-                            if "Size" in shape.text_frame.text:
+                            txt = shape.text_frame.text.strip().lower()
+
+                            # Match conditions: 'size', 'x' (jaise 8x3ya 96 x 36)
+                            if (
+                                "size" in txt
+                                or "x" in txt
+                                or "x" in txt.replace(" ", "")
+                            ):
                                 shapes_to_remove.append(shape)
                                 box_found = True
 
+                                # Save position & dimensions
                                 last_left = shape.left
                                 last_top = shape.top
                                 last_width = shape.width
@@ -91,12 +100,21 @@ if uploaded_excel and uploaded_ppt:
                                 except Exception:
                                     pass
 
-                    # Delete old boxes
+                    # STEP 2: Purane Box ka Text pehle CLEAR karein, fir Shape Delete karein
                     for shape in shapes_to_remove:
-                        sp = shape._element
-                        sp.getparent().remove(sp)
+                        try:
+                            # Pehle text ko completely empty kar dein (Overlap Prevention)
+                            shape.text_frame.text = ""
+                            for p in shape.text_frame.paragraphs:
+                                p.text = ""
 
-                    # Re-create box
+                            # Phir shape ko XML tree se remove karein
+                            sp = shape._element
+                            sp.getparent().remove(sp)
+                        except Exception:
+                            pass
+
+                    # STEP 3: Naya Clean Box Banayein
                     if size_val and size_val.lower() != "nan":
                         if last_left is not None:
                             new_box = slide.shapes.add_shape(
@@ -113,10 +131,12 @@ if uploaded_excel and uploaded_ppt:
                                 last_color = RGBColor(227, 108, 10)
 
                             new_box.line.color.rgb = last_color
-                            new_box.line.width = Pt(3.0)
+                            new_box.line.width = Pt(3.0)  # Border Thickness
 
                             tf = new_box.text_frame
                             tf.word_wrap = False
+
+                            # Text set karne se pehle purana clear kar rahe hain
                             p = tf.paragraphs[0]
                             p.text = f"Size: {size_val}"
                             p.alignment = PP_ALIGN.CENTER
@@ -125,16 +145,18 @@ if uploaded_excel and uploaded_ppt:
                             run.font.name = "Calibri"
                             run.font.size = Pt(18)
                             run.font.bold = True
-                            run.font.color.rgb = RGBColor(0, 80, 160)
+                            run.font.color.rgb = RGBColor(
+                                0, 80, 160
+                            )  # PPT Blue
                         else:
                             manual_check_slides.append(slide_no)
 
-                # Save output to memory buffer for download
+                # Save output PPT
                 output_ppt_path = "Updated_Presentation.pptx"
                 prs.save(output_ppt_path)
 
                 st.success(
-                    "🎉 PPT Successfully Update ho gayi hai! Niche button se download karein."
+                    "🎉 PPT Successfully Update ho gayi hai! Pure Old Text Delete ho gaye hain."
                 )
 
                 if manual_check_slides:
