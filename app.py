@@ -12,7 +12,7 @@ st.set_page_config(
 
 st.title("📊 PPT Size Box Auto-Fixer")
 st.write(
-    "Apni **Excel File** aur **PPT File** upload karein. Code slide ke saare purane text ko clean karke naya aligned Orange Size Box bana dega."
+    "Apni **Excel File** aur **PPT File** upload karein. Automatic font size aur border style match hoke new box create ho jayega."
 )
 
 st.markdown("---")
@@ -37,7 +37,6 @@ if uploaded_excel and uploaded_ppt:
                         break
 
                 prs = Presentation(uploaded_ppt)
-                manual_check_slides = []
 
                 # Process Slides
                 for i, slide in enumerate(prs.slides):
@@ -56,19 +55,56 @@ if uploaded_excel and uploaded_ppt:
                     qty_box = None
                     shapes_to_remove = []
 
-                    # STEP 1: Slide ke sabhi Shapes ko scan karein
+                    # Default Formatting (Agar Inherit na ho sake)
+                    target_font_size = Pt(20)  # Match with Type: FL
+                    target_font_name = "Calibri"
+                    target_font_color = RGBColor(0, 80, 160)  # PPT Blue
+                    target_border_color = RGBColor(227, 108, 10)  # Orange
+                    target_border_width = Pt(1.5)
+
+                    # STEP 1: Slide scan karke Type: box, Qty: box aur Size box dhoondhna
                     for shape in slide.shapes:
                         if shape.has_text_frame:
                             txt = shape.text_frame.text.strip()
                             txt_lower = txt.lower()
 
-                            # Detect Type Box & Qty Box (Position matching ke liye)
+                            # Type Box Detect karna (Properties Inherit karne ke liye)
                             if "type" in txt_lower and "size" not in txt_lower:
                                 type_box = shape
+
+                                # Auto Inherit Font & Border Properties
+                                try:
+                                    # Border Color & Width Inherit
+                                    if shape.line.fill.type == 1:
+                                        target_border_color = (
+                                            shape.line.color.rgb
+                                        )
+                                    if shape.line.width:
+                                        target_border_width = shape.line.width
+
+                                    # Font Properties Inherit
+                                    first_p = shape.text_frame.paragraphs[0]
+                                    if first_p.runs:
+                                        first_run = first_p.runs[0]
+                                        if first_run.font.size:
+                                            target_font_size = (
+                                                first_run.font.size
+                                            )
+                                        if first_run.font.name:
+                                            target_font_name = (
+                                                first_run.font.name
+                                            )
+                                        if first_run.font.color.rgb:
+                                            target_font_color = (
+                                                first_run.font.color.rgb
+                                            )
+                                except Exception:
+                                    pass
+
                             elif "qty" in txt_lower and "size" not in txt_lower:
                                 qty_box = shape
 
-                            # Clean/Delete: Size word ho, 'x' pattern ho ya bottom-middle space me floating text ho
+                            # Delete Old Size Box / Garbage Text
                             if (
                                 "size" in txt_lower
                                 or ("x" in txt_lower and len(txt) < 20)
@@ -82,7 +118,7 @@ if uploaded_excel and uploaded_ppt:
                             ):
                                 shapes_to_remove.append(shape)
 
-                    # STEP 2: Purane Shapes aur Background Plain Text Complete Wipe Out
+                    # STEP 2: Clear Old Elements
                     for shape in shapes_to_remove:
                         try:
                             shape.text_frame.text = ""
@@ -93,28 +129,27 @@ if uploaded_excel and uploaded_ppt:
                         except Exception:
                             pass
 
-                    # STEP 3: Alignment Calculate Karein (Type aur Qty ke beech)
+                    # STEP 3: Alignment Calculate
                     if type_box and qty_box:
+                        target_width = Pt(160)  # Font bada hone par width badha di
+                        target_height = type_box.height
+                        target_top = type_box.top
                         target_left = int(
                             (
                                 type_box.left
                                 + type_box.width
                                 + qty_box.left
-                                - Pt(130)
+                                - target_width
                             )
                             / 2
                         )
-                        target_top = type_box.top
-                        target_width = Pt(130)
-                        target_height = type_box.height
                     else:
-                        # Fallback position agar Type/Qty na mile
                         target_left = Pt(450)
                         target_top = Pt(437)
-                        target_width = Pt(130)
-                        target_height = Pt(30)
+                        target_width = Pt(160)
+                        target_height = Pt(32)
 
-                    # STEP 4: Perfect Single Clean Orange Box Create Karein
+                    # STEP 4: Create Exact Matching Box
                     if size_val and size_val.lower() != "nan":
                         new_box = slide.shapes.add_shape(
                             MSO_SHAPE.RECTANGLE,
@@ -125,11 +160,12 @@ if uploaded_excel and uploaded_ppt:
                         )
 
                         new_box.fill.background()
-                        new_box.line.color.rgb = RGBColor(
-                            227, 108, 10
-                        )  # Orange Border
-                        new_box.line.width = Pt(2.0)  # Clean Border
 
+                        # Border matching
+                        new_box.line.color.rgb = target_border_color
+                        new_box.line.width = target_border_width
+
+                        # Text formatting matching
                         tf = new_box.text_frame
                         tf.word_wrap = False
                         p = tf.paragraphs[0]
@@ -137,19 +173,19 @@ if uploaded_excel and uploaded_ppt:
                         p.alignment = PP_ALIGN.CENTER
 
                         run = p.runs[0]
-                        run.font.name = "Calibri"
-                        run.font.size = Pt(16)
+                        run.font.name = target_font_name
+                        run.font.size = target_font_size  # Same Font Size (20pt)
                         run.font.bold = True
-                        run.font.color.rgb = RGBColor(
-                            0, 80, 160
-                        )  # PPT Blue Font
+                        run.font.color.rgb = (
+                            target_font_color  # Same Color Blue
+                        )
 
                 # Save Output
                 output_ppt_path = "Updated_Presentation.pptx"
                 prs.save(output_ppt_path)
 
                 st.success(
-                    "🎉 PPT Successfully Clean & Align Ho Gayi Hai! Old Overlapping Text Bilkul Clear Ho Gaya."
+                    "🎉 PPT Successfully Updated with Exact Font & Border Style Matching!"
                 )
 
                 # Download Button
