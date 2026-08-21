@@ -12,7 +12,7 @@ st.set_page_config(
     layout="centered",
 )
 
-st.title("📊 Dynamic Font Size & Color PPT Automator")
+st.title("📊 THIS TOOL TO CONVERT DIMENSIONS SIZE FROM INCHES TO FEET OR FEET TO INCHES IN PPT")
 st.write(
     "Yeh script slide me maujood neighbouring boxes se **Font Size, Color aur Font Family automatically detect** karke same style apply karegi."
 )
