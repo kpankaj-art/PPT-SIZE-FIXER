@@ -7,14 +7,14 @@ from pptx.util import Pt
 import streamlit as st
 
 st.set_page_config(
-    page_title="Dynamic Font & Color PPT Automator",
+    page_title="PPT SIZE FIXER",
     page_icon="📊",
     layout="centered",
 )
 
-st.title("📊 THIS TOOL TO CONVERT DIMENSIONS SIZE FROM INCHES TO FEET OR FEET TO INCHES IN PPT")
+st.title("📊 PPT SIZE FIXER")
 st.write(
-    "Yeh script slide me maujood neighbouring boxes se **Font Size, Color aur Font Family automatically detect** karke same style apply karegi."
+    "THIS TOOL TO CONVERT DIMENSIONS FROM INCHES TO FEET OR FEET TO INCHES IN PPT."
 )
 
 st.markdown("---")
