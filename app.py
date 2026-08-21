@@ -5,12 +5,12 @@ from pptx.util import Pt
 import streamlit as st
 
 st.set_page_config(
-    page_title="PPT Size & Remarks Automator", page_icon="📊", layout="centered"
+    page_title="PPT Size Auto Clean Automator", page_icon="📊", layout="centered"
 )
 
-st.title("📊 Auto-Fit Text PPT Automator")
+st.title("📊 Clean Wipe & Replace PPT Automator")
 st.write(
-    "Yeh code text ko single line me rakhega aur long values ke liye font size auto-adjust karega."
+    "Yeh code purane text ko pehle poora **erasing/clean** karega taaki overlap na ho."
 )
 
 st.markdown("---")
@@ -63,7 +63,7 @@ if uploaded_excel and uploaded_ppt:
                     except Exception:
                         remarks_val = ""
 
-                    # Clean newlines or trailing spaces
+                    # Clean newlines or spaces
                     size_val = " ".join(size_val.split())
                     remarks_val = " ".join(remarks_val.split())
 
@@ -77,7 +77,7 @@ if uploaded_excel and uploaded_ppt:
                                 for k in ["outlet", "address", "mobile"]
                             )
 
-                            # Identify Size Box
+                            # Match SIZE Box
                             is_size_box = (
                                 (
                                     "size" in txt_lower
@@ -90,7 +90,7 @@ if uploaded_excel and uploaded_ppt:
                                 and not is_excluded
                             )
 
-                            # Identify Remarks Box
+                            # Match REMARKS Box
                             is_remarks_box = (
                                 any(k in txt_lower for k in ["remark", "remarks"])
                                 and not is_excluded
@@ -99,35 +99,40 @@ if uploaded_excel and uploaded_ppt:
                             # UPDATE SIZE BOX
                             if is_size_box and size_val and size_val.lower() != "nan":
                                 tf = shape.text_frame
-                                tf.word_wrap = False  # Stacking hone se roke
+                                tf.word_wrap = False
+                                
+                                # STEP 1: Purane Text frame ko COMPLETELY ERASE kar do
+                                tf.text = ""
 
+                                # STEP 2: Naya text clean single paragraph me write karo
                                 final_size_text = (
                                     size_val
                                     if size_val.lower().startswith("size")
                                     else f"Size: {size_val}"
                                 )
 
-                                # Clear extra paragraphs
-                                while len(tf.paragraphs) > 1:
-                                    p_elem = tf.paragraphs[-1]._p
-                                    p_elem.getparent().remove(p_elem)
-
                                 p = tf.paragraphs[0]
-                                p.text = final_size_text
                                 p.alignment = PP_ALIGN.CENTER
+                                run = p.add_run()
+                                run.text = final_size_text
+                                run.font.bold = True
 
-                                # Dynamic Auto-Font Sizing based on length
+                                # Dynamic Font Sizing (Zero Overlap & Stacking)
                                 text_len = len(final_size_text)
-                                font_size = Pt(14) if text_len < 12 else (Pt(11) if text_len < 16 else Pt(9.5))
-
-                                for run in p.runs:
-                                    run.font.size = font_size
-                                    run.font.bold = True
+                                if text_len < 12:
+                                    run.font.size = Pt(13)
+                                elif text_len < 16:
+                                    run.font.size = Pt(11)
+                                else:
+                                    run.font.size = Pt(9.5)
 
                             # UPDATE REMARKS BOX
                             if is_remarks_box and remarks_val and remarks_val.lower() != "nan":
                                 tf = shape.text_frame
                                 tf.word_wrap = False
+                                
+                                # Clear Remarks box completely before writing
+                                tf.text = ""
 
                                 final_remarks_text = (
                                     remarks_val
@@ -135,20 +140,15 @@ if uploaded_excel and uploaded_ppt:
                                     else f"Remarks: {remarks_val}"
                                 )
 
-                                while len(tf.paragraphs) > 1:
-                                    p_elem = tf.paragraphs[-1]._p
-                                    p_elem.getparent().remove(p_elem)
-
                                 p = tf.paragraphs[0]
-                                p.text = final_remarks_text
-
-                                for run in p.runs:
-                                    run.font.size = Pt(11)
+                                run = p.add_run()
+                                run.text = final_remarks_text
+                                run.font.size = Pt(11)
 
                 output_ppt_path = "Updated_Presentation.pptx"
                 prs.save(output_ppt_path)
 
-                st.success("🎉 PPT Successfully Updated! Text bilkul perfectly fit ho gaya hai.")
+                st.success("🎉 PPT Updated! Purana size poora delete ho kar naya size clean format me aagya.")
 
                 with open(output_ppt_path, "rb") as file:
                     st.download_button(
