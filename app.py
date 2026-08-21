@@ -7,12 +7,12 @@ from pptx.util import Pt
 import streamlit as st
 
 st.set_page_config(
-    page_title="PPT Size Box Automator", page_icon="📊", layout="centered"
+    page_title="PPT Spatial Clean Automator", page_icon="📊", layout="centered"
 )
 
-st.title("📊 Clean Delete & Re-Create PPT Automator")
+st.title("📊 Spatial Coordinate Clean & Re-Create Automator")
 st.write(
-    "Pehle purana text/box bilkul delete hoga, fir Excel se Naya Size Box exact position par create hoga."
+    "Yeh code `Media Type` aur `Qty` ke beech ke pure area ko 100% clean wiping karke fresh Size box add karega."
 )
 
 st.markdown("---")
@@ -24,7 +24,7 @@ uploaded_ppt = st.file_uploader("2. Upload PPT File (.pptx)", type=["pptx"])
 
 if uploaded_excel and uploaded_ppt:
     if st.button("🚀 Process & Regenerate PPT Size Box", type="primary"):
-        with st.spinner("Processing Presentation and Excel Data..."):
+        with st.spinner("Clearing Zone & Updating PPT..."):
             try:
                 # 1. Read Excel safely
                 xl_file = pd.ExcelFile(uploaded_excel)
@@ -35,7 +35,7 @@ if uploaded_excel and uploaded_ppt:
                 )
                 df = pd.read_excel(uploaded_excel, sheet_name=sheet_to_use)
 
-                # 2. Find Size Column in Excel
+                # 2. Auto Find Size Column
                 size_column_name = None
                 for col in df.columns:
                     if "size" in str(col).lower():
@@ -43,16 +43,6 @@ if uploaded_excel and uploaded_ppt:
                         break
 
                 prs = Presentation(uploaded_ppt)
-
-                # Default Position & Style Memory (if ppt doesn't have existing coordinates)
-                target_left = Pt(280)
-                target_top = Pt(435)
-                target_width = Pt(120)
-                target_height = Pt(28)
-                target_border_color = RGBColor(227, 108, 10)
-                target_font_color = RGBColor(0, 0, 0)
-                target_font_size = Pt(11)
-                target_font_name = "Calibri"
 
                 # Process Slides
                 for i, slide in enumerate(prs.slides):
@@ -65,74 +55,74 @@ if uploaded_excel and uploaded_ppt:
                     except Exception:
                         size_val = ""
 
+                    # Coordinates memory for new box
+                    media_right_edge = Pt(240)
+                    qty_left_edge = Pt(400)
+                    target_top = Pt(432)
+                    target_height = Pt(28)
+
                     shapes_to_delete = []
 
-                    # STEP 1: SCAN & MATCH all Old Size Elements (Plain Text + Shape Box)
+                    # STEP 1: SCAN SPATIAL ZONE & KEYWORDS
                     for shape in slide.shapes:
+                        txt = ""
                         if shape.has_text_frame:
                             txt = shape.text_frame.text.strip()
-                            txt_lower = txt.lower()
+                        txt_lower = txt.lower()
 
-                            is_excluded = any(
-                                k in txt_lower
-                                for k in [
-                                    "media",
-                                    "qty",
-                                    "remark",
-                                    "outlet",
-                                    "address",
-                                    "mobile",
-                                ]
-                            )
+                        # Protected keywords check
+                        is_protected = any(
+                            k in txt_lower
+                            for k in [
+                                "media",
+                                "qty",
+                                "remark",
+                                "outlet",
+                                "address",
+                                "mobile",
+                            ]
+                        )
 
-                            # Match Size Box or size-related floating texts
-                            if (
-                                "size" in txt_lower
-                                or ("x" in txt_lower and len(txt) < 25)
-                            ) and not is_excluded:
-                                shapes_to_delete.append(shape)
-
-                                # Save exact layout coordinates from the first matched shape
-                                target_left = shape.left
+                        if is_protected:
+                            if "media" in txt_lower:
+                                media_right_edge = shape.left + shape.width
                                 target_top = shape.top
-                                target_width = shape.width
                                 target_height = shape.height
+                            elif "qty" in txt_lower:
+                                qty_left_edge = shape.left
+                            continue
 
-                                # Save font properties if available
-                                try:
-                                    if shape.line.fill.type == 1:
-                                        target_border_color = (
-                                            shape.line.color.rgb
-                                        )
-                                    p = shape.text_frame.paragraphs[0]
-                                    if p.runs:
-                                        r = p.runs[0]
-                                        if r.font.name:
-                                            target_font_name = r.font.name
-                                        if r.font.size:
-                                            target_font_size = r.font.size
-                                        if r.font.color.rgb:
-                                            target_font_color = (
-                                                r.font.color.rgb
-                                            )
-                                except Exception:
-                                    pass
+                        # Condition A: Text explicitly contains "size" or dimension pattern
+                        is_size_text = "size" in txt_lower or (
+                            "x" in txt_lower and len(txt) < 25
+                        )
 
-                    # STEP 2: COMPLETE HARD DELETE (Clear XML + Erase Frame)
+                        # Condition B: Position based (Anything sitting in the middle gap)
+                        # Scanning horizontal center area between Media and Qty
+                        is_in_target_zone = (
+                            shape.top > Pt(380)
+                            and shape.left > Pt(200)
+                            and shape.left < Pt(450)
+                        )
+
+                        if is_size_text or is_in_target_zone:
+                            shapes_to_delete.append(shape)
+
+                    # STEP 2: HARD PURGE (Delete Text Frames + XML Shape Elements)
                     for shape in shapes_to_delete:
                         try:
-                            # Sub-text clear
-                            shape.text_frame.text = ""
-                            for p in shape.text_frame.paragraphs:
-                                p.text = ""
+                            if shape.has_text_frame:
+                                shape.text_frame.text = ""
+                                for p in shape.text_frame.paragraphs:
+                                    p.text = ""
 
-                            # XML Element deletion (Permanent PPT purge)
+                            # Remove element directly from PowerPoint XML Tree
                             sp = shape._element
                             sp.getparent().remove(sp)
                         except Exception:
                             pass
 
-                    # STEP 3: CREATE EXACT SINGLE NEW BOX
+                    # STEP 3: CREATE CLEAN NEW SIZE BOX
                     if size_val and size_val.lower() != "nan":
                         final_text = (
                             size_val
@@ -140,48 +130,54 @@ if uploaded_excel and uploaded_ppt:
                             else f"Size: {size_val}"
                         )
 
-                        # Create Clean Shape Box
+                        # Calculate precise width and position in the middle
+                        box_left = media_right_edge + Pt(10)
+                        box_width = (qty_left_edge - media_right_edge) - Pt(20)
+
+                        if box_width < Pt(80):
+                            box_width = Pt(130)
+
+                        # Draw Box
                         new_box = slide.shapes.add_shape(
                             MSO_SHAPE.RECTANGLE,
-                            target_left,
+                            box_left,
                             target_top,
-                            target_width,
+                            box_width,
                             target_height,
                         )
 
-                        # Styling Outer Box
+                        # Transparent background with standard orange border
                         new_box.fill.background()
-                        new_box.line.color.rgb = target_border_color
+                        new_box.line.color.rgb = RGBColor(227, 108, 10)
                         new_box.line.width = Pt(1.5)
 
-                        # Text Formatting
+                        # Insert Clean Text
                         tf = new_box.text_frame
                         tf.word_wrap = False
-
                         p = tf.paragraphs[0]
                         p.alignment = PP_ALIGN.CENTER
 
                         run = p.add_run()
                         run.text = final_text
-                        run.font.name = target_font_name
+                        run.font.name = "Calibri"
                         run.font.bold = True
-                        run.font.color.rgb = target_font_color
+                        run.font.color.rgb = RGBColor(0, 0, 0)
 
-                        # Auto Font Scaling for Tight Fits
+                        # Font size scaling according to text length
                         text_len = len(final_text)
-                        if text_len > 15:
+                        if text_len > 16:
                             run.font.size = Pt(9.5)
                         elif text_len > 12:
                             run.font.size = Pt(10.5)
                         else:
-                            run.font.size = target_font_size
+                            run.font.size = Pt(11.5)
 
-                # Save Updated Presentation
+                # Save PPT File
                 output_ppt_path = "Updated_Presentation.pptx"
                 prs.save(output_ppt_path)
 
                 st.success(
-                    "🎉 Purana Saara Size Content Delete Ho Gaya Aur Excel Se Sirf 1 Naya Size Box Ready Hai!"
+                    "🎉 Complete Zone Cleaned! Peeche pada float text `12 3` poori tarah erase ho gaya hai aur Naya Size Box perfectly placement me aa gaya hai."
                 )
 
                 with open(output_ppt_path, "rb") as file:
