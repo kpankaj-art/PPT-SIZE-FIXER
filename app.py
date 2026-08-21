@@ -8,9 +8,7 @@ import streamlit as st
 
 # MUST BE THE FIRST STREAMLIT COMMAND IN APP.PY
 st.set_page_config(
-    page_title="PPT Size Fixer",
-    page_icon="📊",
-    layout="centered"
+    page_title="PPT Size Fixer", page_icon="📊", layout="centered"
 )
 
 st.title("📊 PPT SIZE FIXER")
@@ -20,23 +18,37 @@ st.write(
 
 st.markdown("---")
 
+# 1. Support for .xlsx, .xls, .csv, .xlsm
 uploaded_excel = st.file_uploader(
-    "1. Upload Excel File (.xlsx)", type=["xlsx"]
+    "1. Upload Master Excel File (.xlsx, .xls, .csv, .xlsm)",
+    type=["xlsx", "xls", "csv", "xlsm"],
 )
-uploaded_ppt = st.file_uploader("2. Upload PPT File (.pptx)", type=["pptx"])
+uploaded_ppt = st.file_uploader(
+    "2. Upload PowerPoint Presentation (.pptx)", type=["pptx"]
+)
+
+
+# Helper function to read all excel formats safely
+def read_excel_safely(uploaded_file):
+    file_name = uploaded_file.name.lower()
+    if file_name.endswith(".csv"):
+        return pd.read_csv(uploaded_file)
+    else:
+        xl_file = pd.ExcelFile(uploaded_file)
+        sheet_to_use = (
+            "Merged_Result"
+            if "Merged_Result" in xl_file.sheet_names
+            else xl_file.sheet_names[0]
+        )
+        return pd.read_excel(uploaded_file, sheet_name=sheet_to_use)
+
 
 if uploaded_excel and uploaded_ppt:
-    if st.button("🚀 Process & Regenerate PPT Size Box", type="primary"):
+    if st.button("🚀 Process & Sync Files", type="primary"):
         with st.spinner("Detecting Dynamic Font Sizes & Processing..."):
             try:
-                # 1. Excel Read safely
-                xl_file = pd.ExcelFile(uploaded_excel)
-                sheet_to_use = (
-                    "Merged_Result"
-                    if "Merged_Result" in xl_file.sheet_names
-                    else xl_file.sheet_names[0]
-                )
-                df = pd.read_excel(uploaded_excel, sheet_name=sheet_to_use)
+                # 1. Read Excel safely (Any Format)
+                df = read_excel_safely(uploaded_excel)
 
                 # 2. Find Size Column
                 size_column_name = None
