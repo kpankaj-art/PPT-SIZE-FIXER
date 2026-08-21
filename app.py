@@ -261,7 +261,7 @@ if uploaded_excel and uploaded_ppt:
                 prs.save(output_ppt_path)
 
                 st.success(
-                    "🎉 Auto-Detection Complete! Slide se Exact Font Size, Color, aur Font Family detect karke Size Box par apply ho chuka hai."
+                    "🎉 THE PPT SIZE HAS BEEN CHANGED SUCCESSFULLY."
                 )
 
                 with open(output_ppt_path, "rb") as file:
