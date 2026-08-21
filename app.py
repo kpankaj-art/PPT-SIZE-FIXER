@@ -6,10 +6,11 @@ from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Pt
 import streamlit as st
 
+# MUST BE THE FIRST STREAMLIT COMMAND IN APP.PY
 st.set_page_config(
-    page_title="PPT SIZE FIXER",
+    page_title="PPT Size Fixer",
     page_icon="📊",
-    layout="centered",
+    layout="centered"
 )
 
 st.title("📊 PPT SIZE FIXER")
