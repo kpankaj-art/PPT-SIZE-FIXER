@@ -1,26 +1,30 @@
 import pandas as pd
 from pptx import Presentation
+from pptx.dml.color import RGBColor
+from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import PP_ALIGN
 from pptx.util import Pt
 import streamlit as st
 
 st.set_page_config(
-    page_title="PPT Size Auto Clean Automator", page_icon="📊", layout="centered"
+    page_title="PPT Size Box Automator", page_icon="📊", layout="centered"
 )
 
-st.title("📊 Clean Wipe & Replace PPT Automator")
+st.title("📊 Clean Delete & Re-Create PPT Automator")
 st.write(
-    "Yeh code purane text ko pehle poora **erasing/clean** karega taaki overlap na ho."
+    "Pehle purana text/box bilkul delete hoga, fir Excel se Naya Size Box exact position par create hoga."
 )
 
 st.markdown("---")
 
-uploaded_excel = st.file_uploader("1. Upload Excel File (.xlsx)", type=["xlsx"])
+uploaded_excel = st.file_uploader(
+    "1. Upload Excel File (.xlsx)", type=["xlsx"]
+)
 uploaded_ppt = st.file_uploader("2. Upload PPT File (.pptx)", type=["pptx"])
 
 if uploaded_excel and uploaded_ppt:
-    if st.button("🚀 Process & Update PPT", type="primary"):
-        with st.spinner("Updating Presentation Data..."):
+    if st.button("🚀 Process & Regenerate PPT Size Box", type="primary"):
+        with st.spinner("Processing Presentation and Excel Data..."):
             try:
                 # 1. Read Excel safely
                 xl_file = pd.ExcelFile(uploaded_excel)
@@ -31,22 +35,28 @@ if uploaded_excel and uploaded_ppt:
                 )
                 df = pd.read_excel(uploaded_excel, sheet_name=sheet_to_use)
 
-                # 2. Find Size & Remarks Columns
+                # 2. Find Size Column in Excel
                 size_column_name = None
-                remarks_column_name = None
-
                 for col in df.columns:
-                    col_lower = str(col).lower()
-                    if "size" in col_lower and not size_column_name:
+                    if "size" in str(col).lower():
                         size_column_name = col
-                    if any(k in col_lower for k in ["remark", "remarks", "comment"]) and not remarks_column_name:
-                        remarks_column_name = col
+                        break
 
                 prs = Presentation(uploaded_ppt)
 
+                # Default Position & Style Memory (if ppt doesn't have existing coordinates)
+                target_left = Pt(280)
+                target_top = Pt(435)
+                target_width = Pt(120)
+                target_height = Pt(28)
+                target_border_color = RGBColor(227, 108, 10)
+                target_font_color = RGBColor(0, 0, 0)
+                target_font_size = Pt(11)
+                target_font_name = "Calibri"
+
                 # Process Slides
                 for i, slide in enumerate(prs.slides):
-                    # Fetch Excel Values
+                    # Fetch Excel Value
                     try:
                         if size_column_name:
                             size_val = str(df[size_column_name].iloc[i]).strip()
@@ -55,18 +65,9 @@ if uploaded_excel and uploaded_ppt:
                     except Exception:
                         size_val = ""
 
-                    try:
-                        if remarks_column_name:
-                            remarks_val = str(df[remarks_column_name].iloc[i]).strip()
-                        else:
-                            remarks_val = ""
-                    except Exception:
-                        remarks_val = ""
+                    shapes_to_delete = []
 
-                    # Clean newlines or spaces
-                    size_val = " ".join(size_val.split())
-                    remarks_val = " ".join(remarks_val.split())
-
+                    # STEP 1: SCAN & MATCH all Old Size Elements (Plain Text + Shape Box)
                     for shape in slide.shapes:
                         if shape.has_text_frame:
                             txt = shape.text_frame.text.strip()
@@ -74,81 +75,114 @@ if uploaded_excel and uploaded_ppt:
 
                             is_excluded = any(
                                 k in txt_lower
-                                for k in ["outlet", "address", "mobile"]
+                                for k in [
+                                    "media",
+                                    "qty",
+                                    "remark",
+                                    "outlet",
+                                    "address",
+                                    "mobile",
+                                ]
                             )
 
-                            # Match SIZE Box
-                            is_size_box = (
-                                (
-                                    "size" in txt_lower
-                                    or ("x" in txt_lower and len(txt) < 25)
-                                )
-                                and not any(
-                                    k in txt_lower
-                                    for k in ["media", "qty", "remark"]
-                                )
-                                and not is_excluded
-                            )
+                            # Match Size Box or size-related floating texts
+                            if (
+                                "size" in txt_lower
+                                or ("x" in txt_lower and len(txt) < 25)
+                            ) and not is_excluded:
+                                shapes_to_delete.append(shape)
 
-                            # Match REMARKS Box
-                            is_remarks_box = (
-                                any(k in txt_lower for k in ["remark", "remarks"])
-                                and not is_excluded
-                            )
+                                # Save exact layout coordinates from the first matched shape
+                                target_left = shape.left
+                                target_top = shape.top
+                                target_width = shape.width
+                                target_height = shape.height
 
-                            # UPDATE SIZE BOX
-                            if is_size_box and size_val and size_val.lower() != "nan":
-                                tf = shape.text_frame
-                                tf.word_wrap = False
-                                
-                                # STEP 1: Purane Text frame ko COMPLETELY ERASE kar do
-                                tf.text = ""
+                                # Save font properties if available
+                                try:
+                                    if shape.line.fill.type == 1:
+                                        target_border_color = (
+                                            shape.line.color.rgb
+                                        )
+                                    p = shape.text_frame.paragraphs[0]
+                                    if p.runs:
+                                        r = p.runs[0]
+                                        if r.font.name:
+                                            target_font_name = r.font.name
+                                        if r.font.size:
+                                            target_font_size = r.font.size
+                                        if r.font.color.rgb:
+                                            target_font_color = (
+                                                r.font.color.rgb
+                                            )
+                                except Exception:
+                                    pass
 
-                                # STEP 2: Naya text clean single paragraph me write karo
-                                final_size_text = (
-                                    size_val
-                                    if size_val.lower().startswith("size")
-                                    else f"Size: {size_val}"
-                                )
+                    # STEP 2: COMPLETE HARD DELETE (Clear XML + Erase Frame)
+                    for shape in shapes_to_delete:
+                        try:
+                            # Sub-text clear
+                            shape.text_frame.text = ""
+                            for p in shape.text_frame.paragraphs:
+                                p.text = ""
 
-                                p = tf.paragraphs[0]
-                                p.alignment = PP_ALIGN.CENTER
-                                run = p.add_run()
-                                run.text = final_size_text
-                                run.font.bold = True
+                            # XML Element deletion (Permanent PPT purge)
+                            sp = shape._element
+                            sp.getparent().remove(sp)
+                        except Exception:
+                            pass
 
-                                # Dynamic Font Sizing (Zero Overlap & Stacking)
-                                text_len = len(final_size_text)
-                                if text_len < 12:
-                                    run.font.size = Pt(13)
-                                elif text_len < 16:
-                                    run.font.size = Pt(11)
-                                else:
-                                    run.font.size = Pt(9.5)
+                    # STEP 3: CREATE EXACT SINGLE NEW BOX
+                    if size_val and size_val.lower() != "nan":
+                        final_text = (
+                            size_val
+                            if size_val.lower().startswith("size")
+                            else f"Size: {size_val}"
+                        )
 
-                            # UPDATE REMARKS BOX
-                            if is_remarks_box and remarks_val and remarks_val.lower() != "nan":
-                                tf = shape.text_frame
-                                tf.word_wrap = False
-                                
-                                # Clear Remarks box completely before writing
-                                tf.text = ""
+                        # Create Clean Shape Box
+                        new_box = slide.shapes.add_shape(
+                            MSO_SHAPE.RECTANGLE,
+                            target_left,
+                            target_top,
+                            target_width,
+                            target_height,
+                        )
 
-                                final_remarks_text = (
-                                    remarks_val
-                                    if remarks_val.lower().startswith("remark")
-                                    else f"Remarks: {remarks_val}"
-                                )
+                        # Styling Outer Box
+                        new_box.fill.background()
+                        new_box.line.color.rgb = target_border_color
+                        new_box.line.width = Pt(1.5)
 
-                                p = tf.paragraphs[0]
-                                run = p.add_run()
-                                run.text = final_remarks_text
-                                run.font.size = Pt(11)
+                        # Text Formatting
+                        tf = new_box.text_frame
+                        tf.word_wrap = False
 
+                        p = tf.paragraphs[0]
+                        p.alignment = PP_ALIGN.CENTER
+
+                        run = p.add_run()
+                        run.text = final_text
+                        run.font.name = target_font_name
+                        run.font.bold = True
+                        run.font.color.rgb = target_font_color
+
+                        # Auto Font Scaling for Tight Fits
+                        text_len = len(final_text)
+                        if text_len > 15:
+                            run.font.size = Pt(9.5)
+                        elif text_len > 12:
+                            run.font.size = Pt(10.5)
+                        else:
+                            run.font.size = target_font_size
+
+                # Save Updated Presentation
                 output_ppt_path = "Updated_Presentation.pptx"
                 prs.save(output_ppt_path)
 
-                st.success("🎉 PPT Updated! Purana size poora delete ho kar naya size clean format me aagya.")
+                st.success(
+                    "🎉 Purana Saara Size Content Delete Ho Gaya Aur Excel Se Sirf 1 Naya Size Box Ready Hai!"
+                )
 
                 with open(output_ppt_path, "rb") as file:
                     st.download_button(
