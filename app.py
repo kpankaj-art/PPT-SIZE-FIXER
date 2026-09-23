@@ -4,6 +4,7 @@ import re
 import io
 
 from pptx import Presentation
+from pptx.util import Inches
 
 
 # =========================================================
@@ -11,7 +12,7 @@ from pptx import Presentation
 # =========================================================
 
 st.set_page_config(
-    page_title="PPT SIZE FIXER V8",
+    page_title="PPT SIZE FIXER V9",
     page_icon="📐",
     layout="wide"
 )
@@ -24,7 +25,8 @@ st.set_page_config(
 st.title("📐 PPT SIZE FIXER")
 
 st.caption(
-    "Excel Width × Height ko PPT ke existing Size field mein replace karega."
+    "Excel ke Width/Height columns automatically detect karke "
+    "PPT ke existing Size field ko update karega."
 )
 
 
@@ -39,39 +41,61 @@ if "result_df" not in st.session_state:
     st.session_state.result_df = None
 
 if "output_filename" not in st.session_state:
-    st.session_state.output_filename = "PPT_SIZE_FIXED_V8.pptx"
+    st.session_state.output_filename = (
+        "PPT_SIZE_FIXED_V9.pptx"
+    )
 
 
 # =========================================================
-# WIDTH / HEIGHT ALIASES
-# IMPORTANT:
-# Short aliases like "H" are NOT used for automatic
-# detection unless no proper Height heading exists.
+# WIDTH ALIASES
 # =========================================================
 
-WIDTH_EXACT_ALIASES = [
+WIDTH_ALIASES = {
+    "w",
     "width",
-    "width inches",
+    "wight",
+    "wid",
+    "widths",
     "width inch",
-    "width (inches)",
-    "width (inch)",
+    "width inches",
+    "width inchs",
+    "width in inch",
     "width in inches",
+    "width (inch)",
+    "width (inches)",
+    "w inch",
+    "w inches",
+    "w (inch)",
+    "w (inches)",
     "board width",
-    "size width",
-    "width size"
-]
+    "size width"
+}
 
-HEIGHT_EXACT_ALIASES = [
+
+# =========================================================
+# HEIGHT ALIASES
+# =========================================================
+
+HEIGHT_ALIASES = {
+    "h",
     "height",
-    "height inches",
+    "hight",
+    "heigt",
+    "ht",
     "height inch",
-    "height (inches)",
-    "height (inch)",
+    "height inches",
+    "height inchs",
+    "height in inch",
     "height in inches",
+    "height (inch)",
+    "height (inches)",
+    "h inch",
+    "h inches",
+    "h (inch)",
+    "h (inches)",
     "board height",
-    "size height",
-    "height size"
-]
+    "size height"
+}
 
 
 # =========================================================
@@ -116,13 +140,15 @@ def normalize_text(value):
     text = text.replace("\r", " ")
     text = text.replace("\t", " ")
 
+    text = text.lower()
+
     text = re.sub(
         r"\s+",
         " ",
         text
     )
 
-    return text.strip().lower()
+    return text.strip()
 
 
 # =========================================================
@@ -133,15 +159,13 @@ def normalize_column_name(value):
 
     text = normalize_text(value)
 
-    # Replace common separators
     text = text.replace("_", " ")
     text = text.replace("-", " ")
+    text = text.replace("/", " ")
 
-    # Remove brackets
     text = text.replace("(", " ")
     text = text.replace(")", " ")
 
-    # Remove punctuation
     text = re.sub(
         r"[^a-z0-9\s]",
         " ",
@@ -158,242 +182,266 @@ def normalize_column_name(value):
 
 
 # =========================================================
-# COLUMN TYPE DETECTION
+# COLUMN ALIAS SCORE
 # =========================================================
 
-def column_contains_word(
+def alias_score(
     column_name,
-    word
+    aliases,
+    kind
 ):
 
     normalized = normalize_column_name(
         column_name
     )
 
+    if not normalized:
+        return -1
+
+    # -----------------------------------------------------
+    # Exact alias
+    # -----------------------------------------------------
+
+    if normalized in aliases:
+
+        if normalized in {
+            "w",
+            "h"
+        }:
+
+            return 1000
+
+        if normalized in {
+            "width",
+            "height"
+        }:
+
+            return 1100
+
+        return 1050
+
+    # -----------------------------------------------------
+    # Token based
+    # -----------------------------------------------------
+
     words = normalized.split()
 
-    return word in words
+    score = 0
+
+    if kind == "width":
+
+        if "width" in words:
+            score += 800
+
+        if "wight" in words:
+            score += 750
+
+        if "wid" in words:
+            score += 700
+
+        if "w" in words:
+            score += 600
+
+    elif kind == "height":
+
+        if "height" in words:
+            score += 800
+
+        if "hight" in words:
+            score += 750
+
+        if "heigt" in words:
+            score += 750
+
+        if "ht" in words:
+            score += 650
+
+        if "h" in words:
+            score += 600
+
+    # -----------------------------------------------------
+    # Inch words
+    # -----------------------------------------------------
+
+    if "inch" in words:
+        score += 30
+
+    if "inches" in words:
+        score += 30
+
+    # -----------------------------------------------------
+    # Size words
+    # -----------------------------------------------------
+
+    if "size" in words:
+        score += 10
+
+    return score
 
 
 # =========================================================
-# FIND WIDTH COLUMN
+# FIND WIDTH + HEIGHT COLUMNS
 #
-# STRICT:
-# First exact proper Width heading.
-# Then token based Width heading.
-# NEVER uses "W" alone.
+# IMPORTANT:
+# Width and Height are detected as a PAIR.
+#
+# Examples:
+#
+# W | H
+#
+# Width | Height
+#
+# Wight | Height
+#
+# Width (inches) | Height (inches)
+#
 # =========================================================
 
-def find_width_column(
+def detect_size_columns(
     columns
 ):
 
+    columns = list(
+        columns
+    )
+
     # -----------------------------------------------------
-    # 1. Exact aliases
+    # Generate scores
     # -----------------------------------------------------
 
-    normalized_map = {}
+    width_candidates = []
+    height_candidates = []
 
-    for col in columns:
+    for column in columns:
 
-        normalized_map[
-            normalize_column_name(col)
-        ] = col
-
-    for alias in WIDTH_EXACT_ALIASES:
-
-        alias_norm = normalize_column_name(
-            alias
+        width_score = alias_score(
+            column,
+            WIDTH_ALIASES,
+            "width"
         )
 
-        if alias_norm in normalized_map:
-
-            return normalized_map[
-                alias_norm
-            ]
-
-    # -----------------------------------------------------
-    # 2. Token based
-    # -----------------------------------------------------
-
-    candidates = []
-
-    for col in columns:
-
-        normalized = normalize_column_name(
-            col
+        height_score = alias_score(
+            column,
+            HEIGHT_ALIASES,
+            "height"
         )
 
-        words = normalized.split()
+        if width_score >= 600:
 
-        if "width" in words:
-
-            score = 0
-
-            if normalized.startswith(
-                "width"
-            ):
-                score += 100
-
-            if "inch" in words:
-                score += 20
-
-            if "inches" in words:
-                score += 20
-
-            if "size" in words:
-                score += 5
-
-            candidates.append(
+            width_candidates.append(
                 (
-                    score,
-                    col
+                    width_score,
+                    column
                 )
             )
 
-    if candidates:
+        if height_score >= 600:
 
-        candidates.sort(
+            height_candidates.append(
+                (
+                    height_score,
+                    column
+                )
+            )
+
+    # Highest score first
+    width_candidates.sort(
+        key=lambda x: x[0],
+        reverse=True
+    )
+
+    height_candidates.sort(
+        key=lambda x: x[0],
+        reverse=True
+    )
+
+    # -----------------------------------------------------
+    # Find best DIFFERENT pair
+    # -----------------------------------------------------
+
+    pair_candidates = []
+
+    for width_score, width_col in (
+        width_candidates
+    ):
+
+        for height_score, height_col in (
+            height_candidates
+        ):
+
+            # Same column cannot be Width + Height
+            if width_col == height_col:
+                continue
+
+            pair_score = (
+                width_score
+                +
+                height_score
+            )
+
+            # Strong bonus for exact common pairs
+            w_norm = normalize_column_name(
+                width_col
+            )
+
+            h_norm = normalize_column_name(
+                height_col
+            )
+
+            # W + H
+            if (
+                w_norm == "w"
+                and
+                h_norm == "h"
+            ):
+                pair_score += 500
+
+            # Width + Height
+            if (
+                w_norm == "width"
+                and
+                h_norm == "height"
+            ):
+                pair_score += 500
+
+            # Wight + Height
+            if (
+                w_norm == "wight"
+                and
+                h_norm == "height"
+            ):
+                pair_score += 450
+
+            pair_candidates.append(
+                (
+                    pair_score,
+                    width_col,
+                    height_col
+                )
+            )
+
+    if pair_candidates:
+
+        pair_candidates.sort(
             key=lambda x: x[0],
             reverse=True
         )
 
-        return candidates[0][1]
+        best = pair_candidates[0]
 
-    return None
+        return (
+            best[1],
+            best[2]
+        )
+
+    return (
+        None,
+        None
+    )
 
 
 # =========================================================
-# FIND HEIGHT COLUMN
-#
-# STRICT:
-# First exact proper Height heading.
-# Then token based Height heading.
-# NEVER uses "H" alone unless explicitly enabled
-# as a final fallback.
-# =========================================================
-
-def find_height_column(
-    columns,
-    width_column=None
-):
-
-    # -----------------------------------------------------
-    # 1. Exact aliases
-    # -----------------------------------------------------
-
-    normalized_map = {}
-
-    for col in columns:
-
-        # Never use Width column as Height
-        if (
-            width_column is not None
-            and
-            col == width_column
-        ):
-            continue
-
-        normalized_map[
-            normalize_column_name(col)
-        ] = col
-
-    for alias in HEIGHT_EXACT_ALIASES:
-
-        alias_norm = normalize_column_name(
-            alias
-        )
-
-        if alias_norm in normalized_map:
-
-            return normalized_map[
-                alias_norm
-            ]
-
-    # -----------------------------------------------------
-    # 2. Token based
-    # -----------------------------------------------------
-
-    candidates = []
-
-    for col in columns:
-
-        if (
-            width_column is not None
-            and
-            col == width_column
-        ):
-            continue
-
-        normalized = normalize_column_name(
-            col
-        )
-
-        words = normalized.split()
-
-        if "height" in words:
-
-            score = 0
-
-            if normalized.startswith(
-                "height"
-            ):
-                score += 100
-
-            if "inch" in words:
-                score += 20
-
-            if "inches" in words:
-                score += 20
-
-            if "size" in words:
-                score += 5
-
-            candidates.append(
-                (
-                    score,
-                    col
-                )
-            )
-
-    if candidates:
-
-        candidates.sort(
-            key=lambda x: x[0],
-            reverse=True
-        )
-
-        return candidates[0][1]
-
-    # -----------------------------------------------------
-    # 3. LAST RESORT:
-    # Only use H if there is literally a column named H.
-    #
-    # But NEVER use arbitrary fuzzy matching.
-    # -----------------------------------------------------
-
-    for col in columns:
-
-        if (
-            width_column is not None
-            and
-            col == width_column
-        ):
-            continue
-
-        normalized = normalize_column_name(
-            col
-        )
-
-        if normalized == "h":
-
-            return col
-
-    return None
-
-
-# =========================================================
-# CLEAN EXCEL NUMBER
+# CLEAN NUMBER
 # =========================================================
 
 def clean_number(value):
@@ -406,7 +454,10 @@ def clean_number(value):
     if not text:
         return ""
 
-    text = text.replace(",", "")
+    text = text.replace(
+        ",",
+        ""
+    )
 
     # Remove units
     text = re.sub(
@@ -416,7 +467,6 @@ def clean_number(value):
         flags=re.IGNORECASE
     )
 
-    # Remove spaces
     text = text.strip()
 
     try:
@@ -441,51 +491,12 @@ def clean_number(value):
 
 
 # =========================================================
-# PROTECTED FIELD
-# =========================================================
-
-def is_protected_field(text):
-
-    normalized = normalize_text(
-        text
-    )
-
-    if not normalized:
-        return False
-
-    if normalized in PROTECTED_WORDS:
-        return True
-
-    for word in PROTECTED_WORDS:
-
-        if normalized.startswith(
-            word + ":"
-        ):
-            return True
-
-        if normalized.startswith(
-            word + " :"
-        ):
-            return True
-
-        if normalized.startswith(
-            word + " :-"
-        ):
-            return True
-
-        if normalized.startswith(
-            word + " -"
-        ):
-            return True
-
-    return False
-
-
-# =========================================================
 # GET SHAPE TEXT
 # =========================================================
 
-def get_shape_text(shape):
+def get_shape_text(
+    shape
+):
 
     try:
 
@@ -515,35 +526,36 @@ def set_shape_text(
 
         text_frame = shape.text_frame
 
-        # ---------------------------------------------
         # Preserve first run formatting
-        # ---------------------------------------------
-
         if text_frame.paragraphs:
 
-            paragraph = (
+            first_paragraph = (
                 text_frame.paragraphs[0]
             )
 
-            if paragraph.runs:
+            if first_paragraph.runs:
 
                 first_run = (
-                    paragraph.runs[0]
+                    first_paragraph.runs[0]
                 )
 
                 first_run.text = str(
                     new_text
                 )
 
-                # Clear other runs
-                for run in paragraph.runs[1:]:
+                # Clear extra runs
+                for run in (
+                    first_paragraph.runs[1:]
+                ):
 
                     run.text = ""
 
-                # Clear other paragraphs
-                for p in text_frame.paragraphs[1:]:
+                # Clear extra paragraphs
+                for paragraph in (
+                    text_frame.paragraphs[1:]
+                ):
 
-                    for run in p.runs:
+                    for run in paragraph.runs:
 
                         run.text = ""
 
@@ -604,14 +616,11 @@ def collect_text_shapes(
 # =========================================================
 # SIZE PATTERN
 #
-# Handles:
-#
 # 300X48
 # 300 X 48
 # 300x48
 # 300×48
 # 300 * 48
-# 300 X 48 Inch
 #
 # =========================================================
 
@@ -653,7 +662,7 @@ def contains_size_word(
 
 
 # =========================================================
-# FULL SIZE VALUE
+# FULL SIZE
 # =========================================================
 
 def contains_full_size(
@@ -671,7 +680,7 @@ def contains_full_size(
 
 
 # =========================================================
-# REPLACE SIZE INSIDE SAME TEXTBOX
+# REPLACE SIZE INSIDE TEXTBOX
 #
 # Example:
 #
@@ -680,14 +689,13 @@ def contains_full_size(
 # Type : GSB
 # Size:- 300X48 Inch
 #
-# becomes:
+# Result:
 #
 # Shop Name : ABC
 # Address : XYZ
 # Type : GSB
 # Size:- 180X36 Inch
 #
-# Only 300X48 is changed.
 # =========================================================
 
 def replace_size_inside_text(
@@ -703,10 +711,7 @@ def replace_size_inside_text(
         text
     )
 
-    # -----------------------------------------------------
-    # Find "Size"
-    # -----------------------------------------------------
-
+    # Find Size
     size_match = re.search(
         r"\bsize\b",
         original,
@@ -717,13 +722,6 @@ def replace_size_inside_text(
 
         return original, False
 
-    # -----------------------------------------------------
-    # IMPORTANT:
-    # Search size value ONLY AFTER "Size".
-    # This prevents another number earlier in the
-    # textbox from being replaced.
-    # -----------------------------------------------------
-
     after_size_start = (
         size_match.end()
     )
@@ -732,45 +730,42 @@ def replace_size_inside_text(
         after_size_start:
     ]
 
-    # -----------------------------------------------------
-    # Full Width X Height
-    # -----------------------------------------------------
-
+    # Find dimension AFTER Size
     size_value_match = (
         FULL_SIZE_PATTERN.search(
             after_size
         )
     )
 
-    if size_value_match:
+    if not size_value_match:
 
-        start = (
-            after_size_start
-            +
-            size_value_match.start()
-        )
+        return original, False
 
-        end = (
-            after_size_start
-            +
-            size_value_match.end()
-        )
+    start = (
+        after_size_start
+        +
+        size_value_match.start()
+    )
 
-        new_value = (
-            f"{width}X{height}"
-        )
+    end = (
+        after_size_start
+        +
+        size_value_match.end()
+    )
 
-        new_text = (
-            original[:start]
-            +
-            new_value
-            +
-            original[end:]
-        )
+    new_value = (
+        f"{width}X{height}"
+    )
 
-        return new_text, True
+    new_text = (
+        original[:start]
+        +
+        new_value
+        +
+        original[end:]
+    )
 
-    return original, False
+    return new_text, True
 
 
 # =========================================================
@@ -781,7 +776,7 @@ def find_inline_size_shapes(
     items
 ):
 
-    candidates = []
+    result = []
 
     for item in items:
 
@@ -799,22 +794,22 @@ def find_inline_size_shapes(
         ):
             continue
 
-        candidates.append(
+        result.append(
             item
         )
 
-    return candidates
+    return result
 
 
 # =========================================================
-# SIZE LABEL
+# FIND SIZE LABELS
 # =========================================================
 
 def find_size_labels(
     items
 ):
 
-    labels = []
+    result = []
 
     for item in items:
 
@@ -827,16 +822,17 @@ def find_size_labels(
         ):
             continue
 
+        # Inline size already handled
         if contains_full_size(
             text
         ):
             continue
 
-        labels.append(
+        result.append(
             item
         )
 
-    return labels
+    return result
 
 
 # =========================================================
@@ -881,12 +877,12 @@ def is_x_text(
 # =========================================================
 # FIND SEPARATE SIZE
 #
-# Handles:
+# Example:
 #
 # Size:
-# 180
+# 15
 # X
-# 36
+# 3
 #
 # =========================================================
 
@@ -975,7 +971,7 @@ def find_separate_size(
             )
 
         # -------------------------------------------------
-        # For every X find left/right numbers
+        # Find Width + Height around X
         # -------------------------------------------------
 
         for x_item in x_candidates:
@@ -1016,11 +1012,6 @@ def find_separate_size(
                 ):
                     continue
 
-                if is_protected_field(
-                    item["text"]
-                ):
-                    continue
-
                 center_x = (
                     shape.left
                     +
@@ -1040,7 +1031,7 @@ def find_separate_size(
 
                     continue
 
-                # Keep numbers in Size area
+                # Stay around Size field
                 if (
                     center_x <
                     label_left - Inches(0.25)
@@ -1072,7 +1063,6 @@ def find_separate_size(
             ):
                 continue
 
-            # Closest left number
             left_numbers.sort(
                 key=lambda item:
                 abs(
@@ -1086,7 +1076,6 @@ def find_separate_size(
                 )
             )
 
-            # Closest right number
             right_numbers.sort(
                 key=lambda item:
                 abs(
@@ -1114,7 +1103,7 @@ def find_separate_size(
 
 
 # =========================================================
-# STANDALONE SIZE BOX
+# FIND STANDALONE SIZE BOX
 # =========================================================
 
 def find_standalone_size(
@@ -1203,8 +1192,7 @@ def process_slide(
     )
 
     # =====================================================
-    # PRIORITY 1
-    # SIZE INSIDE SAME TEXTBOX
+    # 1. SIZE INSIDE SAME TEXTBOX
     # =====================================================
 
     inline_items = find_inline_size_shapes(
@@ -1242,8 +1230,7 @@ def process_slide(
                 }
 
     # =====================================================
-    # PRIORITY 2
-    # SEPARATE SIZE FIELDS
+    # 2. SEPARATE SIZE FIELDS
     # =====================================================
 
     labels = find_size_labels(
@@ -1298,8 +1285,7 @@ def process_slide(
             }
 
     # =====================================================
-    # PRIORITY 3
-    # EXISTING STANDALONE SIZE
+    # 3. EXISTING COMBINED SIZE BOX
     # =====================================================
 
     standalone = find_standalone_size(
@@ -1332,7 +1318,7 @@ def process_slide(
             }
 
     # =====================================================
-    # NOT FOUND
+    # 4. NOT FOUND
     # =====================================================
 
     return {
@@ -1410,7 +1396,7 @@ def get_dataframe(
             "Merged_Result"
         )
 
-    # Case-insensitive Merged_Result
+    # Case insensitive
     for name, df in sheets.items():
 
         if normalize_text(
@@ -1505,7 +1491,7 @@ def process_ppt(
     status_box = st.empty()
 
     # =====================================================
-    # SLIDE LOOP
+    # SLIDES
     # =====================================================
 
     for slide_number, slide in enumerate(
@@ -1522,7 +1508,7 @@ def process_ppt(
         )
 
         # -------------------------------------------------
-        # Excel row not available
+        # Excel row unavailable
         # -------------------------------------------------
 
         if excel_index >= len(
@@ -1558,7 +1544,7 @@ def process_ppt(
         ]
 
         # -------------------------------------------------
-        # Missing Width / Height
+        # Missing size
         # -------------------------------------------------
 
         if (
@@ -1586,7 +1572,7 @@ def process_ppt(
             continue
 
         # -------------------------------------------------
-        # Process
+        # Process slide
         # -------------------------------------------------
 
         result = process_slide(
@@ -1632,7 +1618,7 @@ def process_ppt(
 
 
 # =========================================================
-# UPLOAD EXCEL
+# EXCEL UPLOAD
 # =========================================================
 
 st.markdown(
@@ -1647,12 +1633,12 @@ excel_file = st.file_uploader(
         "xlsm",
         "csv"
     ],
-    key="excel_upload_v8"
+    key="excel_upload_v9"
 )
 
 
 # =========================================================
-# UPLOAD PPT
+# PPT UPLOAD
 # =========================================================
 
 st.markdown(
@@ -1664,7 +1650,7 @@ ppt_file = st.file_uploader(
     type=[
         "pptx"
     ],
-    key="ppt_upload_v8"
+    key="ppt_upload_v9"
 )
 
 
@@ -1681,30 +1667,31 @@ if excel_file is not None:
         )
 
         # =================================================
-        # STRICT AUTOMATIC DETECTION
+        # AUTOMATIC WIDTH + HEIGHT DETECTION
         # =================================================
 
-        width_col = find_width_column(
-            df.columns
-        )
-
-        height_col = find_height_column(
-            df.columns,
-            width_col
+        width_col, height_col = (
+            detect_size_columns(
+                df.columns
+            )
         )
 
         # -------------------------------------------------
-        # Width not found
+        # Width/Height not detected
         # -------------------------------------------------
 
-        if width_col is None:
+        if (
+            width_col is None
+            or
+            height_col is None
+        ):
 
             st.error(
-                "❌ Width column automatically detect nahi hua."
+                "❌ Width/Height columns automatically detect nahi hue."
             )
 
             st.write(
-                "Available Excel headings:"
+                "Excel ke available headings:"
             )
 
             st.write(
@@ -1714,34 +1701,14 @@ if excel_file is not None:
             st.stop()
 
         # -------------------------------------------------
-        # Height not found
-        # -------------------------------------------------
-
-        if height_col is None:
-
-            st.error(
-                "❌ Height column automatically detect nahi hua."
-            )
-
-            st.write(
-                "Available Excel headings:"
-            )
-
-            st.write(
-                list(df.columns)
-            )
-
-            st.stop()
-
-        # -------------------------------------------------
-        # SAFETY CHECK
+        # Same column safety
         # -------------------------------------------------
 
         if width_col == height_col:
 
             st.error(
-                "❌ Width aur Height same column detect ho gaye. "
-                "Processing stop kar di gayi hai."
+                "❌ Width aur Height same column detect hue. "
+                "Processing stop kar di gayi."
             )
 
             st.write(
@@ -1753,6 +1720,16 @@ if excel_file is not None:
             )
 
             st.stop()
+
+        # -------------------------------------------------
+        # Small confirmation
+        # -------------------------------------------------
+
+        st.success(
+            f"Excel loaded successfully | "
+            f"Width = {width_col} | "
+            f"Height = {height_col}"
+        )
 
         # =================================================
         # PPT
@@ -1768,7 +1745,7 @@ if excel_file is not None:
 
                 try:
 
-                    # Clear previous
+                    # Clear old result
                     st.session_state.fixed_ppt_bytes = None
                     st.session_state.result_df = None
 
@@ -1788,7 +1765,7 @@ if excel_file is not None:
                     )
 
                     # -------------------------------------
-                    # Save in memory
+                    # Save
                     # -------------------------------------
 
                     output_buffer = io.BytesIO()
@@ -1810,7 +1787,7 @@ if excel_file is not None:
                     )
 
                     st.session_state.output_filename = (
-                        "PPT_SIZE_FIXED_V8.pptx"
+                        "PPT_SIZE_FIXED_V9.pptx"
                     )
 
                     st.success(
@@ -1916,12 +1893,12 @@ if (
         ]
     )
 
-    failed = len(
+    missing = len(
         result_df[
             result_df[
                 "Status"
             ].str.contains(
-                "Failed",
+                "Missing",
                 na=False
             )
         ]
@@ -1948,8 +1925,8 @@ if (
     with c3:
 
         st.metric(
-            "Failed",
-            failed
+            "Width/Height Missing",
+            missing
         )
 
     st.dataframe(
@@ -1968,8 +1945,9 @@ st.markdown(
 )
 
 st.caption(
-    "PPT SIZE FIXER V8 | "
+    "PPT SIZE FIXER V9 | "
     "Excel Row 2 → Slide 1 | "
     "Excel Row 3 → Slide 2 | "
+    "Automatic W/H detection | "
     "Existing Size field only"
 )
