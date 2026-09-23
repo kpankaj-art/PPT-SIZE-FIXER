@@ -2,12 +2,13 @@ from io import BytesIO
 import re
 
 import pandas as pd
+import streamlit as st
+
 from pptx import Presentation
-from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
+from pptx.dml.color import RGBColor
 from pptx.util import Pt
-import streamlit as st
 
 
 # ============================================================
@@ -15,18 +16,20 @@ import streamlit as st
 # ============================================================
 
 st.set_page_config(
-    page_title="PPT SIZE FIXER V3",
+    page_title="PPT SIZE FIXER V4",
     page_icon="📊",
-    layout="centered",
+    layout="centered"
 )
 
-st.title("📊 PPT SIZE FIXER V3")
+st.title("📊 PPT SIZE FIXER V4")
 
-st.write("Excel Width + Height → PPT Size")
+st.write(
+    "Excel Width + Height → PowerPoint Size"
+)
 
 st.info(
-    "SAFE MODE: Media Type, Qty, Remarks, Outlet, Address, "
-    "Contact and SAP Code are protected."
+    "SAFE MODE: Existing Media Type, Qty, Remarks, SAP, "
+    "Outlet, Address and other protected PPT elements are preserved."
 )
 
 st.markdown("---")
@@ -39,18 +42,18 @@ st.markdown("---")
 uploaded_excel = st.file_uploader(
     "1. Upload Master Excel File",
     type=["xlsx", "xls", "csv", "xlsm"],
-    key="excel_uploader_v3",
+    key="excel_uploader_v4"
 )
 
 uploaded_ppt = st.file_uploader(
     "2. Upload PowerPoint Presentation",
     type=["pptx"],
-    key="ppt_uploader_v3",
+    key="ppt_uploader_v4"
 )
 
 
 # ============================================================
-# NORMALIZE TEXT
+# NORMALIZE
 # ============================================================
 
 def normalize_text(value):
@@ -61,9 +64,6 @@ def normalize_text(value):
 
     text = text.replace("_", " ")
     text = text.replace("-", " ")
-    text = text.replace(":", " ")
-    text = text.replace("(", " ")
-    text = text.replace(")", " ")
 
     text = re.sub(r"\s+", " ", text)
 
@@ -76,12 +76,16 @@ def normalize_text(value):
 
 def find_column(df, possible_names):
 
+    columns = list(df.columns)
+
     normalized_columns = {}
 
-    for col in df.columns:
-        normalized_columns[normalize_text(col)] = col
+    for col in columns:
+        normalized_columns[
+            normalize_text(col)
+        ] = col
 
-    # Exact match
+    # Exact
     for name in possible_names:
 
         key = normalize_text(name)
@@ -89,8 +93,8 @@ def find_column(df, possible_names):
         if key in normalized_columns:
             return normalized_columns[key]
 
-    # Safe partial match
-    for col in df.columns:
+    # Partial
+    for col in columns:
 
         col_norm = normalize_text(col)
 
@@ -98,22 +102,10 @@ def find_column(df, possible_names):
 
             name_norm = normalize_text(name)
 
-            if not name_norm:
-                continue
-
-            if col_norm == name_norm:
-                return col
-
-    # Partial only for longer names
-    for col in df.columns:
-
-        col_norm = normalize_text(col)
-
-        for name in possible_names:
-
-            name_norm = normalize_text(name)
-
-            if len(name_norm) >= 4 and name_norm in col_norm:
+            if (
+                name_norm
+                and name_norm in col_norm
+            ):
                 return col
 
     return None
@@ -125,34 +117,23 @@ def find_column(df, possible_names):
 
 def read_excel_safely(file_obj):
 
-    name = file_obj.name.lower()
+    file_name = file_obj.name.lower()
 
-    if name.endswith(".csv"):
-
-        file_obj.seek(0)
+    if file_name.endswith(".csv"):
 
         return pd.read_csv(file_obj)
 
-    file_obj.seek(0)
-
     excel_file = pd.ExcelFile(file_obj)
 
-    if not excel_file.sheet_names:
-        raise ValueError("Excel file has no worksheets.")
-
+    # Prefer Merged_Result
     if "Merged_Result" in excel_file.sheet_names:
-
         sheet_name = "Merged_Result"
-
     else:
-
         sheet_name = excel_file.sheet_names[0]
-
-    file_obj.seek(0)
 
     return pd.read_excel(
         file_obj,
-        sheet_name=sheet_name,
+        sheet_name=sheet_name
     )
 
 
@@ -163,41 +144,51 @@ def read_excel_safely(file_obj):
 def get_size_columns(df):
 
     width_names = [
+
         "width",
         "width inches",
         "width inch",
         "width (inches)",
         "width (inch)",
+
         "w",
         "w inches",
         "w inch",
         "w (inches)",
         "w (inch)",
+
         "board width",
+        "size width",
+
     ]
 
     height_names = [
+
         "height",
         "height inches",
         "height inch",
         "height (inches)",
         "height (inch)",
+
         "h",
         "h inches",
         "h inch",
         "h (inches)",
         "h (inch)",
+
         "board height",
+        "size height",
+
     ]
 
     width_column = find_column(
         df,
-        width_names,
+        width_names
     )
 
     height_column = find_column(
         df,
-        height_names,
+        height_names
     )
 
     return width_column, height_column
@@ -213,10 +204,8 @@ def clean_number(value):
         return ""
 
     try:
-
         if pd.isna(value):
             return ""
-
     except Exception:
         pass
 
@@ -225,20 +214,23 @@ def clean_number(value):
     if not text:
         return ""
 
-    if text.lower() in ("nan", "none", "null"):
+    if text.lower() == "nan":
         return ""
 
     text = text.replace(",", "")
 
     match = re.search(
         r"-?\d+(?:\.\d+)?",
-        text,
+        text
     )
 
     if not match:
         return ""
 
-    number = float(match.group())
+    try:
+        number = float(match.group())
+    except Exception:
+        return ""
 
     if number.is_integer():
         return str(int(number))
@@ -251,7 +243,8 @@ def clean_number(value):
 
 
 # ============================================================
-# CREATE FINAL SIZE
+# FINAL PPT SIZE
+#
 # IMPORTANT:
 # WIDTH X HEIGHT
 # ============================================================
@@ -281,180 +274,359 @@ def get_shape_text(shape):
         return shape.text_frame.text.strip()
 
     except Exception:
+
         return ""
 
 
 # ============================================================
-# GET TEXT SHAPES ONLY ONCE
+# COLLECT TEXT SHAPES ONCE
+#
+# IMPORTANT FOR PERFORMANCE
 # ============================================================
 
 def collect_text_shapes(slide):
 
     result = []
 
-    try:
+    for shape in slide.shapes:
 
-        for shape in slide.shapes:
+        try:
 
-            try:
+            text = get_shape_text(shape)
 
-                if not shape.has_text_frame:
-                    continue
+            if text:
 
-                text = shape.text_frame.text.strip()
+                result.append({
+                    "shape": shape,
+                    "text": text,
+                    "norm": normalize_text(text),
+                    "left": shape.left,
+                    "top": shape.top,
+                    "width": shape.width,
+                    "height": shape.height
+                })
 
-                if not text:
-                    continue
-
-                result.append(
-                    {
-                        "shape": shape,
-                        "text": text,
-                        "norm": normalize_text(text),
-                        "left": shape.left,
-                        "top": shape.top,
-                        "width": shape.width,
-                        "height": shape.height,
-                    }
-                )
-
-            except Exception:
-                continue
-
-    except Exception:
-        pass
+        except Exception:
+            continue
 
     return result
-
-
-# ============================================================
-# SIZE LABEL CHECK
-# ============================================================
-
-def is_size_label(text):
-
-    norm = normalize_text(text)
-
-    return norm in {
-        "size",
-        "size :",
-        "size -",
-        "size :-",
-    }
 
 
 # ============================================================
 # PROTECTED FIELD
 # ============================================================
 
-def is_protected(text):
+def is_protected_text(text):
 
-    norm = normalize_text(text)
+    if not text:
+        return False
 
-    protected = [
+    t = normalize_text(text)
+
+    protected_exact = {
+
         "media",
+        "media:",
         "media type",
+        "media type:",
+
         "qty",
+        "qty:",
         "quantity",
+        "quantity:",
+
         "remarks",
+        "remarks:",
         "remark",
+        "remark:",
+
         "outlet",
+        "outlet:",
         "outlet name",
+        "outlet name:",
+
         "address",
+        "address:",
+
         "contact",
+        "contact:",
         "contact no",
+        "contact no:",
+
         "sap",
+        "sap:",
         "sap code",
+        "sap code:",
+
+    }
+
+    if t in protected_exact:
+        return True
+
+    protected_words = [
+        "media type",
+        "contact no",
+        "sap code",
+        "outlet name"
     ]
 
-    for word in protected:
+    for word in protected_words:
 
-        if norm == word:
-            return True
-
-        if word in norm and len(word) >= 6:
+        if word in t:
             return True
 
     return False
 
 
 # ============================================================
-# SIZE TEXT CHECK
+# SIZE PATTERN
 # ============================================================
 
-def looks_like_combined_size(text):
+SIZE_PATTERN = re.compile(
+    r"""
+    (?P<w>\d+(?:\.\d+)?)
+    \s*
+    [xX×*]
+    \s*
+    (?P<h>\d+(?:\.\d+)?)
+    """,
+    re.VERBOSE
+)
+
+
+# ============================================================
+# STANDALONE SIZE
+#
+# Example:
+# 180 X 36
+# 240X36
+# 96 × 48
+# ============================================================
+
+def is_standalone_size(text):
 
     if not text:
         return False
 
-    value = str(text).strip()
+    text = str(text).strip()
 
-    pattern = (
+    pattern = re.compile(
         r"^\s*"
         r"\d+(?:\.\d+)?"
-        r"\s*[xX×*]"
-        r"\s*"
+        r"\s*[xX×*]\s*"
         r"\d+(?:\.\d+)?"
-        r"\s*"
-        r"(?:in|inch|inches|ft|feet)?"
-        r"\s*$"
+        r"(?:\s*(?:in|inch|inches|ft|feet))?"
+        r"\s*$",
+        re.IGNORECASE
     )
 
     return bool(
-        re.match(
-            pattern,
-            value,
-        )
+        pattern.match(text)
     )
 
 
 # ============================================================
-# NUMBER ONLY
+# INLINE SIZE FIELD
+#
+# Examples:
+# Size :- 180X48
+# Size: 180 X 48
+# Size - 180X48
 # ============================================================
 
-def is_number_only(text):
+def is_inline_size_field(text):
 
     if not text:
         return False
 
-    value = str(text).strip()
+    t = normalize_text(text)
+
+    if "size" not in t:
+        return False
 
     return bool(
-        re.fullmatch(
-            r"\d+(?:\.\d+)?",
-            value,
-        )
+        SIZE_PATTERN.search(text)
     )
 
 
 # ============================================================
-# X SEPARATOR
+# FIND SIZE LABEL
 # ============================================================
 
-def is_x_separator(text):
+def find_size_label(text_shapes):
 
-    if not text:
-        return False
+    candidates = []
 
-    value = str(text).strip().lower()
+    for item in text_shapes:
 
-    return value in {
-        "x",
-        "×",
-        "*",
-    }
+        text = item["text"]
+        norm = item["norm"]
+
+        if norm in [
+            "size",
+            "size:",
+            "size :",
+            "size :-",
+            "size -"
+        ]:
+
+            candidates.append(item)
+
+    if not candidates:
+        return None
+
+    # Prefer lower size field
+    candidates.sort(
+        key=lambda x: x["top"],
+        reverse=True
+    )
+
+    return candidates[0]
+
+
+# ============================================================
+# FIND INLINE SIZE FIELD
+# ============================================================
+
+def find_inline_size_field(text_shapes):
+
+    candidates = []
+
+    for item in text_shapes:
+
+        text = item["text"]
+
+        if is_inline_size_field(text):
+
+            # Never touch protected fields
+            if is_protected_text(text):
+                continue
+
+            candidates.append(item)
+
+    if not candidates:
+        return None
+
+    # Prefer the lower size-related field
+    candidates.sort(
+        key=lambda x: x["top"],
+        reverse=True
+    )
+
+    return candidates[0]
+
+
+# ============================================================
+# FIND STANDALONE SIZE BOX
+#
+# We search near the Size label.
+# ============================================================
+
+def find_standalone_size_box(
+    text_shapes,
+    size_label
+):
+
+    if size_label is None:
+        return None
+
+    label = size_label["shape"]
+
+    label_left = label.left
+    label_right = (
+        label.left
+        + label.width
+    )
+
+    label_center_y = (
+        label.top
+        + label.height / 2
+    )
+
+    candidates = []
+
+    for item in text_shapes:
+
+        shape = item["shape"]
+        text = item["text"]
+
+        if shape == label:
+            continue
+
+        if is_protected_text(text):
+            continue
+
+        if not is_standalone_size(text):
+            continue
+
+        shape_center_y = (
+            shape.top
+            + shape.height / 2
+        )
+
+        vertical_distance = abs(
+            shape_center_y
+            - label_center_y
+        )
+
+        # Same row tolerance
+        if vertical_distance > Pt(100):
+            continue
+
+        # Distance from label
+        if shape.left >= label_right:
+
+            horizontal_distance = (
+                shape.left
+                - label_right
+            )
+
+        else:
+
+            horizontal_distance = (
+                label_left
+                - (
+                    shape.left
+                    + shape.width
+                )
+            )
+
+        # Too far away
+        if abs(horizontal_distance) > Pt(250):
+            continue
+
+        score = (
+            abs(horizontal_distance)
+            + vertical_distance
+        )
+
+        candidates.append(
+            (
+                score,
+                item
+            )
+        )
+
+    if not candidates:
+        return None
+
+    candidates.sort(
+        key=lambda x: x[0]
+    )
+
+    return candidates[0][1]
 
 
 # ============================================================
 # GET STYLE
 # ============================================================
 
-def get_style(shape):
+def get_style_from_shape(shape):
 
     border_color = RGBColor(
         227,
         108,
-        10,
+        10
     )
 
     line_width = Pt(2)
@@ -464,10 +636,14 @@ def get_style(shape):
     font_color = RGBColor(
         0,
         0,
-        0,
+        0
     )
 
     font_size = Pt(16)
+
+    # --------------------------------------------------------
+    # LINE
+    # --------------------------------------------------------
 
     try:
 
@@ -475,12 +651,11 @@ def get_style(shape):
 
             try:
 
-                if (
-                    shape.line.fill.type == 1
-                    and shape.line.color.rgb
-                ):
+                if shape.line.color.rgb:
 
-                    border_color = shape.line.color.rgb
+                    border_color = (
+                        shape.line.color.rgb
+                    )
 
             except Exception:
                 pass
@@ -488,7 +663,10 @@ def get_style(shape):
             try:
 
                 if shape.line.width:
-                    line_width = shape.line.width
+
+                    line_width = (
+                        shape.line.width
+                    )
 
             except Exception:
                 pass
@@ -496,18 +674,26 @@ def get_style(shape):
     except Exception:
         pass
 
+    # --------------------------------------------------------
+    # FONT
+    # --------------------------------------------------------
+
     try:
 
         if shape.has_text_frame:
 
-            for paragraph in shape.text_frame.paragraphs:
+            for paragraph in (
+                shape.text_frame.paragraphs
+            ):
 
                 for run in paragraph.runs:
 
                     try:
 
                         if run.font.name:
-                            font_name = run.font.name
+                            font_name = (
+                                run.font.name
+                            )
 
                     except Exception:
                         pass
@@ -515,7 +701,9 @@ def get_style(shape):
                     try:
 
                         if run.font.size:
-                            font_size = run.font.size
+                            font_size = (
+                                run.font.size
+                            )
 
                     except Exception:
                         pass
@@ -527,7 +715,9 @@ def get_style(shape):
                             and run.font.color.rgb
                         ):
 
-                            font_color = run.font.color.rgb
+                            font_color = (
+                                run.font.color.rgb
+                            )
 
                     except Exception:
                         pass
@@ -544,31 +734,38 @@ def get_style(shape):
         line_width,
         font_name,
         font_color,
-        font_size,
+        font_size
     )
 
 
 # ============================================================
-# SET TEXT IN EXISTING SHAPE
+# SET SHAPE TEXT
 # ============================================================
 
 def set_shape_text(
     shape,
     text,
-    keep_style=True,
+    style=None,
+    bold=True
 ):
 
     try:
 
-        old_style = get_style(shape)
+        if style is None:
+
+            style = (
+                get_style_from_shape(
+                    shape
+                )
+            )
 
         (
             border_color,
             line_width,
             font_name,
             font_color,
-            font_size,
-        ) = old_style
+            font_size
+        ) = style
 
         tf = shape.text_frame
 
@@ -576,378 +773,244 @@ def set_shape_text(
 
         tf.word_wrap = False
 
-        tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+        tf.vertical_anchor = (
+            MSO_ANCHOR.MIDDLE
+        )
 
         tf.margin_top = Pt(1)
         tf.margin_bottom = Pt(1)
         tf.margin_left = Pt(1)
         tf.margin_right = Pt(1)
 
-        paragraph = tf.paragraphs[0]
+        paragraph = (
+            tf.paragraphs[0]
+        )
 
-        paragraph.alignment = PP_ALIGN.CENTER
+        paragraph.alignment = (
+            PP_ALIGN.CENTER
+        )
 
-        run = paragraph.add_run()
+        run = (
+            paragraph.add_run()
+        )
 
-        run.text = text
+        run.text = str(text)
 
         run.font.name = font_name
 
-        run.font.bold = True
-
         run.font.size = font_size
 
+        run.font.bold = bold
+
         try:
-            run.font.color.rgb = font_color
+
+            run.font.color.rgb = (
+                font_color
+            )
+
         except Exception:
             pass
 
-        if keep_style:
+        try:
 
-            try:
-                shape.line.color.rgb = border_color
-                shape.line.width = line_width
-            except Exception:
-                pass
+            shape.line.color.rgb = (
+                border_color
+            )
+
+            shape.line.width = (
+                line_width
+            )
+
+        except Exception:
+            pass
 
         return True
 
     except Exception:
+
         return False
 
 
 # ============================================================
-# UPDATE COMBINED SIZE
+# UPDATE INLINE SIZE
+#
+# Keeps:
+# Size :-
+#
+# Only replaces:
+# 180X48
+#
+# with:
+# 240 X 36
 # ============================================================
 
-def update_combined_size(
-    text_shapes,
-    final_size,
+def update_inline_size(
+    shape,
+    final_size
 ):
 
-    candidates = []
+    try:
 
-    for item in text_shapes:
+        old_text = get_shape_text(
+            shape
+        )
 
-        shape = item["shape"]
+        match = SIZE_PATTERN.search(
+            old_text
+        )
 
-        text = item["text"]
+        if not match:
+            return False
 
-        if is_protected(text):
-            continue
+        start = match.start()
+        end = match.end()
 
-        if looks_like_combined_size(text):
+        new_text = (
+            old_text[:start]
+            + final_size
+            + old_text[end:]
+        )
 
-            candidates.append(item)
+        style = (
+            get_style_from_shape(
+                shape
+            )
+        )
 
-    if not candidates:
-        return None
+        return set_shape_text(
+            shape,
+            new_text,
+            style,
+            bold=True
+        )
 
-    # Prefer lower portion
-    candidates.sort(
-        key=lambda x: x["top"],
-        reverse=True,
-    )
+    except Exception:
 
-    target = candidates[0]["shape"]
-
-    if set_shape_text(
-        target,
-        final_size,
-    ):
-
-        return target
-
-    return None
+        return False
 
 
 # ============================================================
-# UPDATE SEPARATE WIDTH / HEIGHT / X
+# UPDATE EXISTING SIZE BOX
 # ============================================================
 
-def update_separate_size(
-    text_shapes,
-    size_label,
-    width,
-    height,
+def update_existing_size_box(
+    shape,
+    final_size
 ):
 
-    if size_label is None:
+    try:
+
+        style = (
+            get_style_from_shape(
+                shape
+            )
+        )
+
+        return set_shape_text(
+            shape,
+            final_size,
+            style,
+            bold=True
+        )
+
+    except Exception:
+
         return False
-
-    width_text = clean_number(width)
-    height_text = clean_number(height)
-
-    if not width_text or not height_text:
-        return False
-
-    label_center_y = (
-        size_label.top
-        + size_label.height / 2
-    )
-
-    label_right = (
-        size_label.left
-        + size_label.width
-    )
-
-    candidates = []
-
-    for item in text_shapes:
-
-        shape = item["shape"]
-
-        text = item["text"]
-
-        if shape == size_label:
-            continue
-
-        if is_protected(text):
-            continue
-
-        if not is_number_only(text):
-            continue
-
-        center_y = (
-            shape.top
-            + shape.height / 2
-        )
-
-        vertical_distance = abs(
-            center_y - label_center_y
-        )
-
-        if vertical_distance > Pt(80):
-            continue
-
-        horizontal_distance = (
-            shape.left - label_right
-        )
-
-        if horizontal_distance < -Pt(30):
-            continue
-
-        if horizontal_distance > Pt(300):
-            continue
-
-        candidates.append(
-            (
-                horizontal_distance
-                + vertical_distance,
-                item,
-            )
-        )
-
-    if len(candidates) < 2:
-        return False
-
-    candidates.sort(
-        key=lambda x: x[0]
-    )
-
-    nearby = [
-        item
-        for _, item in candidates[:6]
-    ]
-
-    # Sort from left to right
-    nearby.sort(
-        key=lambda x: x["left"]
-    )
-
-    # Find X separator
-    x_item = None
-
-    for item in nearby:
-
-        if is_x_separator(
-            item["text"]
-        ):
-
-            x_item = item
-            break
-
-    if x_item:
-
-        left_numbers = []
-
-        right_numbers = []
-
-        x_left = x_item["left"]
-
-        for item in nearby:
-
-            if item is x_item:
-                continue
-
-            if not is_number_only(
-                item["text"]
-            ):
-                continue
-
-            if item["left"] < x_left:
-                left_numbers.append(item)
-
-            else:
-                right_numbers.append(item)
-
-        if left_numbers and right_numbers:
-
-            left_numbers.sort(
-                key=lambda x: abs(
-                    x["left"]
-                    - x_item["left"]
-                )
-            )
-
-            right_numbers.sort(
-                key=lambda x: abs(
-                    x["left"]
-                    - x_item["left"]
-                )
-            )
-
-            width_shape = left_numbers[0]["shape"]
-
-            height_shape = right_numbers[0]["shape"]
-
-            ok1 = set_shape_text(
-                width_shape,
-                width_text,
-                keep_style=False,
-            )
-
-            ok2 = set_shape_text(
-                height_shape,
-                height_text,
-                keep_style=False,
-            )
-
-            return ok1 and ok2
-
-    # --------------------------------------------------------
-    # If no X separator:
-    # choose two closest numeric shapes
-    # --------------------------------------------------------
-
-    numeric_shapes = [
-        item
-        for item in nearby
-        if is_number_only(
-            item["text"]
-        )
-    ]
-
-    if len(numeric_shapes) >= 2:
-
-        numeric_shapes.sort(
-            key=lambda x: x["left"]
-        )
-
-        width_shape = numeric_shapes[0]["shape"]
-
-        height_shape = numeric_shapes[1]["shape"]
-
-        ok1 = set_shape_text(
-            width_shape,
-            width_text,
-            keep_style=False,
-        )
-
-        ok2 = set_shape_text(
-            height_shape,
-            height_text,
-            keep_style=False,
-        )
-
-        return ok1 and ok2
-
-    return False
 
 
 # ============================================================
-# CREATE SIZE BOX
+# CREATE NEW SIZE BOX
 # ============================================================
 
 def create_size_box(
     slide,
-    size_label,
-    final_size,
+    size_label_item,
+    final_size
 ):
 
-    if size_label is not None:
+    if size_label_item:
+
+        label_shape = (
+            size_label_item["shape"]
+        )
 
         box_left = (
-            size_label.left
-            + size_label.width
+            label_shape.left
+            + label_shape.width
             + Pt(5)
         )
 
-        box_top = size_label.top
+        box_top = (
+            label_shape.top
+        )
 
-        box_height = size_label.height
+        box_height = (
+            label_shape.height
+        )
+
+        box_width = Pt(120)
+
+        style = (
+            get_style_from_shape(
+                label_shape
+            )
+        )
 
     else:
 
         box_left = Pt(300)
-
         box_top = Pt(430)
 
+        box_width = Pt(120)
         box_height = Pt(30)
 
-    box_width = Pt(130)
+        style = (
+            RGBColor(227, 108, 10),
+            Pt(2),
+            "Calibri",
+            RGBColor(0, 0, 0),
+            Pt(16)
+        )
+
+    (
+        border_color,
+        line_width,
+        font_name,
+        font_color,
+        font_size
+    ) = style
 
     new_box = slide.shapes.add_shape(
         MSO_SHAPE.RECTANGLE,
         box_left,
         box_top,
         box_width,
-        box_height,
+        box_height
     )
 
-    new_box.fill.background()
+    try:
+        new_box.fill.background()
+    except Exception:
+        pass
 
-    new_box.line.color.rgb = RGBColor(
-        227,
-        108,
-        10,
-    )
+    try:
 
-    new_box.line.width = Pt(2)
+        new_box.line.color.rgb = (
+            border_color
+        )
 
-    tf = new_box.text_frame
+        new_box.line.width = (
+            line_width
+        )
 
-    tf.clear()
+    except Exception:
+        pass
 
-    tf.word_wrap = False
-
-    tf.vertical_anchor = (
-        MSO_ANCHOR.MIDDLE
-    )
-
-    tf.margin_top = Pt(1)
-    tf.margin_bottom = Pt(1)
-    tf.margin_left = Pt(1)
-    tf.margin_right = Pt(1)
-
-    paragraph = tf.paragraphs[0]
-
-    paragraph.alignment = PP_ALIGN.CENTER
-
-    run = paragraph.add_run()
-
-    run.text = final_size
-
-    run.font.name = "Calibri"
-
-    run.font.bold = True
-
-    run.font.size = Pt(16)
-
-    run.font.color.rgb = RGBColor(
-        0,
-        0,
-        0,
+    set_shape_text(
+        new_box,
+        final_size,
+        style,
+        bold=True
     )
 
     return new_box
@@ -959,111 +1022,129 @@ def create_size_box(
 
 def process_slide(
     slide,
-    width,
-    height,
+    size_text
 ):
 
     result = {
         "status": "Skipped",
-        "reason": "",
+        "reason": ""
     }
 
-    final_size = make_size(
-        width,
-        height,
-    )
-
-    if not final_size:
+    if not size_text:
 
         result["reason"] = (
-            "Width or Height is blank"
+            "Excel Width/Height is blank"
         )
 
         return result
 
     # --------------------------------------------------------
-    # Collect ALL text shapes only once
+    # COLLECT ALL TEXT SHAPES ONLY ONCE
     # --------------------------------------------------------
 
-    text_shapes = collect_text_shapes(
-        slide
+    text_shapes = (
+        collect_text_shapes(
+            slide
+        )
     )
 
     # --------------------------------------------------------
-    # Find Size label
+    # 1. SPECIAL FORMAT
+    #
+    # Size :- 180X48
+    #
+    # This must be checked FIRST.
     # --------------------------------------------------------
 
-    size_label = None
-
-    for item in text_shapes:
-
-        if is_size_label(
-            item["text"]
-        ):
-
-            size_label = item["shape"]
-
-            break
-
-    # --------------------------------------------------------
-    # FIRST:
-    # Combined format 180X48
-    # --------------------------------------------------------
-
-    combined = update_combined_size(
-        text_shapes,
-        final_size,
+    inline_size = (
+        find_inline_size_field(
+            text_shapes
+        )
     )
 
-    if combined is not None:
+    if inline_size:
 
-        result["status"] = (
-            "Updated Existing Size"
+        success = (
+            update_inline_size(
+                inline_size["shape"],
+                size_text
+            )
         )
 
-        result["reason"] = (
-            "Combined Size value updated"
+        if success:
+
+            result["status"] = (
+                "Updated Inline Size"
+            )
+
+            result["reason"] = (
+                "Updated existing Size :- "
+                "Width X Height field"
+            )
+
+            return result
+
+    # --------------------------------------------------------
+    # 2. FIND SIZE LABEL
+    # --------------------------------------------------------
+
+    size_label = (
+        find_size_label(
+            text_shapes
         )
-
-        return result
+    )
 
     # --------------------------------------------------------
-    # SECOND:
-    # Separate 36 / 180 / x format
+    # 3. FIND EXISTING COMBINED SIZE BOX
+    #
+    # Example:
+    # 180 X 36
+    #
+    # IMPORTANT:
+    # Do this BEFORE creating anything.
     # --------------------------------------------------------
 
-    separate_updated = (
-        update_separate_size(
+    existing_size = (
+        find_standalone_size_box(
             text_shapes,
-            size_label,
-            width,
-            height,
+            size_label
         )
     )
 
-    if separate_updated:
+    if existing_size:
 
-        result["status"] = (
-            "Updated Separate Size"
+        success = (
+            update_existing_size_box(
+                existing_size["shape"],
+                size_text
+            )
         )
 
-        result["reason"] = (
-            "Width and Height values updated"
-        )
+        if success:
 
-        return result
+            result["status"] = (
+                "Updated Existing Size"
+            )
+
+            result["reason"] = (
+                "Existing combined Size box "
+                "updated to Width X Height"
+            )
+
+            return result
 
     # --------------------------------------------------------
-    # THIRD:
-    # Create new Size box
+    # 4. NO EXISTING SIZE FOUND
+    #
+    # Only now create a new box.
     # --------------------------------------------------------
 
-    if size_label is not None:
+    if size_label:
 
         create_size_box(
             slide,
             size_label,
-            final_size,
+            size_text
         )
 
         result["status"] = (
@@ -1071,7 +1152,8 @@ def process_slide(
         )
 
         result["reason"] = (
-            "Existing Size value not safely detected"
+            "No safe existing Size box "
+            "was found"
         )
 
         return result
@@ -1080,138 +1162,178 @@ def process_slide(
     # SAFE SKIP
     # --------------------------------------------------------
 
+    result["status"] = (
+        "Skipped - Safe Mode"
+    )
+
     result["reason"] = (
-        "Size field could not be safely detected"
+        "Size field could not be safely identified"
     )
 
     return result
 
 
 # ============================================================
-# MAIN PROCESS
+# MAIN APPLICATION
 # ============================================================
 
 if uploaded_excel and uploaded_ppt:
 
-    st.markdown("---")
-
     if st.button(
         "🚀 Process & Sync Files",
-        type="primary",
-        use_container_width=True,
+        type="primary"
     ):
 
         try:
 
-            # ==================================================
-            # STEP 1 - READ EXCEL
-            # ==================================================
+            # =================================================
+            # READ EXCEL
+            # =================================================
 
-            status_box = st.empty()
+            with st.status(
+                "Preparing files...",
+                expanded=False
+            ):
 
-            status_box.info(
-                "📖 Reading Excel file..."
-            )
-
-            df = read_excel_safely(
-                uploaded_excel
-            )
-
-            if df.empty:
-
-                st.error(
-                    "❌ Excel file is empty."
+                df = (
+                    read_excel_safely(
+                        uploaded_excel
+                    )
                 )
 
-                st.stop()
+                if df.empty:
 
-            # ==================================================
-            # STEP 2 - FIND WIDTH / HEIGHT
-            # ==================================================
+                    st.error(
+                        "❌ Excel file is empty."
+                    )
 
-            status_box.info(
-                "🔎 Detecting Width and Height columns..."
-            )
+                    st.stop()
 
-            (
-                width_column,
-                height_column,
-            ) = get_size_columns(df)
+                # ---------------------------------------------
+                # FIND WIDTH / HEIGHT
+                # ---------------------------------------------
 
-            if not width_column:
-
-                st.error(
-                    "❌ Width column not found."
+                (
+                    width_column,
+                    height_column
+                ) = get_size_columns(
+                    df
                 )
 
-                st.write(
-                    "Available Excel columns:"
+                if not width_column:
+
+                    st.error(
+                        "❌ Width column not found."
+                    )
+
+                    st.write(
+                        "Available columns:"
+                    )
+
+                    st.write(
+                        list(df.columns)
+                    )
+
+                    st.stop()
+
+                if not height_column:
+
+                    st.error(
+                        "❌ Height column not found."
+                    )
+
+                    st.write(
+                        "Available columns:"
+                    )
+
+                    st.write(
+                        list(df.columns)
+                    )
+
+                    st.stop()
+
+            # =================================================
+            # SHOW DETECTED COLUMNS
+            # =================================================
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+
+                st.success(
+                    f"Width: {width_column}"
                 )
 
-                st.write(
-                    list(df.columns)
+            with col2:
+
+                st.success(
+                    f"Height: {height_column}"
                 )
 
-                st.stop()
+            # =================================================
+            # LOAD PPT
+            # =================================================
 
-            if not height_column:
+            with st.status(
+                "Loading PowerPoint...",
+                expanded=False
+            ):
 
-                st.error(
-                    "❌ Height column not found."
+                ppt_bytes = (
+                    uploaded_ppt.read()
                 )
 
-                st.write(
-                    "Available Excel columns:"
+                prs = Presentation(
+                    BytesIO(
+                        ppt_bytes
+                    )
                 )
-
-                st.write(
-                    list(df.columns)
-                )
-
-                st.stop()
-
-            st.success(
-                f"✅ Width: `{width_column}`"
-            )
-
-            st.success(
-                f"✅ Height: `{height_column}`"
-            )
-
-            # ==================================================
-            # STEP 3 - READ PPT
-            # ==================================================
-
-            status_box.info(
-                "📂 Loading PowerPoint..."
-            )
-
-            ppt_bytes = uploaded_ppt.getvalue()
-
-            prs = Presentation(
-                BytesIO(ppt_bytes)
-            )
 
             total_slides = len(
                 prs.slides
             )
 
-            total_rows = len(df)
+            total_excel_rows = len(
+                df
+            )
 
             process_count = min(
                 total_slides,
-                total_rows,
+                total_excel_rows
             )
 
-            st.info(
-                f"📊 PPT Slides: {total_slides} | "
-                f"Excel Rows: {total_rows} | "
-                f"Slides to process: {process_count}"
+            # =================================================
+            # INFORMATION
+            # =================================================
+
+            st.write(
+                f"📊 PPT Slides: **{total_slides}**"
             )
 
-            # ==================================================
+            st.write(
+                f"📑 Excel Rows: **{total_excel_rows}**"
+            )
+
+            st.write(
+                f"🔄 Slides to process: **{process_count}**"
+            )
+
+            st.markdown("---")
+
+            # =================================================
+            # COUNTERS
+            # =================================================
+
+            updated_count = 0
+            inline_count = 0
+            created_count = 0
+            skipped_count = 0
+
+            report = []
+
+            # =================================================
             # PROGRESS
-            # ==================================================
+            # =================================================
 
             progress_bar = st.progress(
                 0
@@ -1219,57 +1341,67 @@ if uploaded_excel and uploaded_ppt:
 
             progress_text = st.empty()
 
-            # ==================================================
-            # COUNTERS
-            # ==================================================
-
-            updated_count = 0
-            separate_count = 0
-            created_count = 0
-            skipped_count = 0
-
-            report = []
-
-            # ==================================================
+            # =================================================
             # PROCESS SLIDES
-            # ==================================================
+            # =================================================
 
             for i in range(
                 process_count
             ):
 
-                slide = prs.slides[i]
-
-                width = df.iloc[i][
-                    width_column
-                ]
-
-                height = df.iloc[i][
-                    height_column
-                ]
-
-                result = process_slide(
-                    slide,
-                    width,
-                    height,
+                slide = (
+                    prs.slides[i]
                 )
 
-                status = result[
-                    "status"
-                ]
+                # ---------------------------------------------
+                # EXCEL DATA
+                # ---------------------------------------------
 
-                reason = result[
-                    "reason"
-                ]
-
-                final_size = make_size(
-                    width,
-                    height,
+                width = (
+                    df.iloc[i][
+                        width_column
+                    ]
                 )
 
-                # ------------------------------------------------
+                height = (
+                    df.iloc[i][
+                        height_column
+                    ]
+                )
+
+                # ---------------------------------------------
+                # WIDTH X HEIGHT
+                # ---------------------------------------------
+
+                size_text = (
+                    make_size(
+                        width,
+                        height
+                    )
+                )
+
+                # ---------------------------------------------
+                # PROCESS
+                # ---------------------------------------------
+
+                result = (
+                    process_slide(
+                        slide,
+                        size_text
+                    )
+                )
+
+                status = (
+                    result["status"]
+                )
+
+                reason = (
+                    result["reason"]
+                )
+
+                # ---------------------------------------------
                 # COUNTERS
-                # ------------------------------------------------
+                # ---------------------------------------------
 
                 if status == (
                     "Updated Existing Size"
@@ -1278,10 +1410,10 @@ if uploaded_excel and uploaded_ppt:
                     updated_count += 1
 
                 elif status == (
-                    "Updated Separate Size"
+                    "Updated Inline Size"
                 ):
 
-                    separate_count += 1
+                    inline_count += 1
 
                 elif status == (
                     "Created Size Box"
@@ -1293,34 +1425,50 @@ if uploaded_excel and uploaded_ppt:
 
                     skipped_count += 1
 
-                # ------------------------------------------------
+                # ---------------------------------------------
                 # REPORT
-                # ------------------------------------------------
+                # ---------------------------------------------
 
-                report.append(
-                    {
-                        "Slide": i + 1,
-                        "Excel Row": i + 2,
-                        "Width": clean_number(
+                report.append({
+
+                    "Slide":
+                        i + 1,
+
+                    "Excel Row":
+                        i + 2,
+
+                    "Width":
+                        clean_number(
                             width
                         ),
-                        "Height": clean_number(
+
+                    "Height":
+                        clean_number(
                             height
                         ),
-                        "PPT Size": final_size,
-                        "Status": status,
-                        "Reason": reason,
-                    }
-                )
 
-                # ------------------------------------------------
+                    "Final PPT Size":
+                        size_text,
+
+                    "Status":
+                        status,
+
+                    "Reason":
+                        reason,
+
+                })
+
+                # ---------------------------------------------
                 # PROGRESS
-                # ------------------------------------------------
+                # ---------------------------------------------
 
                 percent = int(
                     (
                         (i + 1)
-                        / process_count
+                        / max(
+                            process_count,
+                            1
+                        )
                     )
                     * 100
                 )
@@ -1330,138 +1478,124 @@ if uploaded_excel and uploaded_ppt:
                 )
 
                 progress_text.write(
-                    f"⚙️ Processing slide "
+                    f"Processing slide "
                     f"{i + 1} / {process_count} "
                     f"({percent}%)"
                 )
 
-            # ==================================================
+            # =================================================
             # EXTRA PPT SLIDES
-            # ==================================================
+            # =================================================
 
-            if total_slides > total_rows:
+            if total_slides > total_excel_rows:
 
                 for i in range(
-                    total_rows,
-                    total_slides,
+                    total_excel_rows,
+                    total_slides
                 ):
 
                     skipped_count += 1
 
-                    report.append(
-                        {
-                            "Slide": i + 1,
-                            "Excel Row": "",
-                            "Width": "",
-                            "Height": "",
-                            "PPT Size": "",
-                            "Status": "Skipped",
-                            "Reason": (
-                                "No matching Excel row"
-                            ),
-                        }
-                    )
+                    report.append({
 
-            # ==================================================
+                        "Slide":
+                            i + 1,
+
+                        "Excel Row":
+                            "",
+
+                        "Width":
+                            "",
+
+                        "Height":
+                            "",
+
+                        "Final PPT Size":
+                            "",
+
+                        "Status":
+                            "Skipped",
+
+                        "Reason":
+                            "No matching Excel row"
+
+                    })
+
+            # =================================================
             # SAVE PPT
-            # ==================================================
+            # =================================================
 
-            status_box.info(
-                "💾 Saving updated PowerPoint..."
+            progress_text.write(
+                "Saving updated PowerPoint..."
             )
 
-            output_ppt_buffer = BytesIO()
+            output_buffer = BytesIO()
 
             prs.save(
-                output_ppt_buffer
+                output_buffer
             )
 
-            output_ppt_buffer.seek(0)
-
-            # ==================================================
-            # REPORT DATAFRAME
-            # ==================================================
-
-            report_df = pd.DataFrame(
-                report
+            output_buffer.seek(
+                0
             )
-
-            # ==================================================
-            # COMPLETE
-            # ==================================================
 
             progress_bar.progress(
                 100
             )
 
-            progress_text.success(
-                "✅ Processing completed!"
+            progress_text.write(
+                "✅ Processing completed."
             )
 
-            status_box.empty()
+            # =================================================
+            # SUCCESS
+            # =================================================
 
             st.success(
-                "🎉 PPT Size processing completed successfully."
+                "🎉 PPT processing completed successfully."
             )
 
-            # ==================================================
+            # =================================================
             # METRICS
-            # ==================================================
+            # =================================================
 
-            col1, col2, col3, col4 = (
-                st.columns(4)
-            )
+            c1, c2, c3, c4 = st.columns(4)
 
-            with col1:
+            with c1:
 
                 st.metric(
-                    "Combined Updated",
-                    updated_count,
+                    "Existing Size Updated",
+                    updated_count
                 )
 
-            with col2:
+            with c2:
 
                 st.metric(
-                    "Separate Updated",
-                    separate_count,
+                    "Inline Size Updated",
+                    inline_count
                 )
 
-            with col3:
+            with c3:
 
                 st.metric(
-                    "Created",
-                    created_count,
+                    "New Box Created",
+                    created_count
                 )
 
-            with col4:
+            with c4:
 
                 st.metric(
                     "Skipped",
-                    skipped_count,
+                    skipped_count
                 )
 
-            # ==================================================
-            # DOWNLOAD PPT
-            # ==================================================
-
-            st.download_button(
-                label="📥 Download Updated PPT",
-                data=output_ppt_buffer.getvalue(),
-                file_name=(
-                    "Updated_Presentation_V3.pptx"
-                ),
-                mime=(
-                    "application/vnd.openxmlformats-officedocument."
-                    "presentationml.presentation"
-                ),
-                use_container_width=True,
-            )
-
-            # ==================================================
+            # =================================================
             # REPORT
-            # ==================================================
+            # =================================================
 
-            st.markdown("---")
+            report_df = pd.DataFrame(
+                report
+            )
 
             st.subheader(
                 "📋 Processing Report"
@@ -1470,41 +1604,76 @@ if uploaded_excel and uploaded_ppt:
             st.dataframe(
                 report_df,
                 use_container_width=True,
-                height=500,
+                height=450
             )
 
-            # ==================================================
+            # =================================================
+            # DOWNLOAD PPT
+            # =================================================
+
+            st.download_button(
+
+                label=(
+                    "📥 Download Updated PPT"
+                ),
+
+                data=(
+                    output_buffer.getvalue()
+                ),
+
+                file_name=(
+                    "Updated_Presentation_V4.pptx"
+                ),
+
+                mime=(
+                    "application/vnd.openxmlformats-officedocument."
+                    "presentationml.presentation"
+                ),
+
+                type="primary"
+
+            )
+
+            # =================================================
             # DOWNLOAD REPORT
-            # ==================================================
+            # =================================================
 
             report_buffer = BytesIO()
 
             with pd.ExcelWriter(
                 report_buffer,
-                engine="openpyxl",
+                engine="openpyxl"
             ) as writer:
 
                 report_df.to_excel(
                     writer,
                     index=False,
-                    sheet_name=(
-                        "Processing Report"
-                    ),
+                    sheet_name="Processing Report"
                 )
 
-            report_buffer.seek(0)
+            report_buffer.seek(
+                0
+            )
 
             st.download_button(
-                label="📊 Download Processing Report",
-                data=report_buffer.getvalue(),
+
+                label=(
+                    "📊 Download Processing Report"
+                ),
+
+                data=(
+                    report_buffer.getvalue()
+                ),
+
                 file_name=(
                     "PPT_Size_Processing_Report.xlsx"
                 ),
+
                 mime=(
                     "application/vnd.openxmlformats-officedocument."
                     "spreadsheetml.sheet"
-                ),
-                use_container_width=True,
+                )
+
             )
 
         except Exception as e:
